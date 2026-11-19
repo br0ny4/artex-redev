@@ -13,6 +13,10 @@
 - **规范执行操作台 `/system/policy`**：全量停止横幅（答复分"仅记录"与"答复并恢复"两档）、
   执行层状态与授权上下文摘要、挂起列表与操作员答复、最近 100 条判定流水、审计链一键校验。
   挂起状态 5s 轮询——操作员不该靠刷新才发现测试停了。
+- **MCP 工具模板**：MCP 页新增"工具模板"区，预置 9 个逆向/浏览器/审计/情报服务器
+  （radare2、IDA×2、Ghidra、ReVa、Playwright、Chrome DevTools、Semgrep、VirusTotal），
+  点一下预填命令与参数、保存前可改；每条带安装方式与注意事项。模板只做预填，
+  工具调用仍走 guard 判定（`server/mcp_presets.go`、`GET /api/mcp/presets`）。
 - **挂起联动任务调度**：全量停止时暂停正在运行的任务与主 Agent 对话（等待客户确认可能几小时，
   不暂停就是空烧 token），操作员答复并恢复后自动续跑；只续跑因本次挂起被暂停的任务，操作员
   自己暂停的任务不受影响（`server/policy_hold_pause.go`）。

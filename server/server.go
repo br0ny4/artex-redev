@@ -888,6 +888,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/mcp", s.pgListMCP)
 	mux.HandleFunc("POST /api/mcp", s.pgSaveMCP)
 	mux.HandleFunc("DELETE /api/mcp/{id}", s.pgDeleteMCP)
+	mux.HandleFunc("GET /api/mcp/presets", s.mcpPresetList) // 工具模板：只做预填，新增仍走 POST /api/mcp
 	mux.HandleFunc("GET /api/mcp/{id}/tools", s.pgMCPTools)
 	mux.HandleFunc("POST /api/mcp/{id}/refresh", s.pgRefreshMCP)
 	// 资产同步 — ScopeSentry 数据源

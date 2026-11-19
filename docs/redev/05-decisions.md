@@ -131,6 +131,7 @@
 | 挂起落库与操作员答复 API | ✅ | `db/policy_holds.go`、`server/policy_hold_api.go`（`/api/policy/holds`） |
 | `/api/auth/init` 一次性 setup token（启动日志/环境变量） | ✅ | `server/auth.go`、setup 页 |
 | 前端操作台 `/system/policy`：挂起横幅 + 答复（记录/恢复两种）+ 判定流水 + 审计链校验 | ✅ | 顾问/蓝队可直接作业 |
+| MCP 工具模板（9 个：radare2 / IDA×2 / Ghidra / ReVa / Playwright / CDP / Semgrep / VirusTotal） | ✅ | `server/mcp_presets.go` + `/api/mcp/presets` + MCP 页模板区 |
 | 挂起联动任务调度：全量停止即暂停在跑任务，答复恢复后续跑（只续跑因挂起暂停的） | ✅ | `server/policy_hold_pause.go` + e2e 测试 |
 | **未做**：合规矩阵端到端用例（当前各层单测已覆盖） | ⬜ | 下一个切片 |
 

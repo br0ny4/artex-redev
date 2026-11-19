@@ -111,3 +111,46 @@ func itoaTest(n int64) string {
 	}
 	return string(b)
 }
+
+// TestMCPPresetsEndpoint 守住"工具模板可发现"：列表非空、字段完整、命令不空
+// （前端按它预填表单，字段缺失会直接变成空 sheet）。
+func TestMCPPresetsEndpoint(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/mcp/presets", nil)
+	rec := httptest.NewRecorder()
+	s := &Server{}
+	s.mcpPresetList(rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		Presets []MCPPreset `json:"presets"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(body.Presets) < 5 {
+		t.Fatalf("模板太少（%d），至少要覆盖逆向/浏览器/审计三类", len(body.Presets))
+	}
+	seen := map[string]bool{}
+	for _, p := range body.Presets {
+		if p.Key == "" || p.Name == "" || p.Doc == "" {
+			t.Fatalf("模板缺字段: %+v", p)
+		}
+		if seen[p.Key] {
+			t.Fatalf("模板 key 重复: %s", p.Key)
+		}
+		seen[p.Key] = true
+		switch p.Transport {
+		case "stdio":
+			if p.Command == "" {
+				t.Fatalf("stdio 模板 %s 缺 command", p.Key)
+			}
+		case "http", "sse":
+			if p.URL == "" {
+				t.Fatalf("远程模板 %s 缺 url", p.Key)
+			}
+		default:
+			t.Fatalf("模板 %s transport 非法: %q", p.Key, p.Transport)
+		}
+	}
+}

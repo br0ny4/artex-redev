@@ -61,6 +61,7 @@ import type {
   LLMRetryOverride,
   LLMRetryPolicy,
   LLMTask,
+  MCPPreset,
   MCPServer,
   MCPTool,
   MissingSkill,
@@ -1107,6 +1108,7 @@ export const api = {
 
   // ---- mcp ----
   mcpServers: () => get<{ servers: MCPServer[] }>("/mcp").then((r) => arr(r.servers)),
+  mcpPresets: () => get<{ presets: MCPPreset[] }>("/mcp/presets").then((r) => arr(r.presets)),
   saveMcpServer: (m: Partial<MCPServer>) => post<{ id: number }>("/mcp", m),
   deleteMcpServer: (id: number) => del<{ deleted: number }>(`/mcp/${id}`),
   mcpTools: (id: number) => get<{ tools: MCPTool[] }>(`/mcp/${id}/tools`).then((r) => arr(r.tools)),

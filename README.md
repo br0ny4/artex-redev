@@ -67,9 +67,9 @@ FLASH 通报，全球金融/政府/科技/国防等行业受影响；公网上�
 | P0 | 安全硬化：默认回环、登录限速、fail-closed 开关、镜像自建 | ✅ |
 | P1 | 内核：engagement 数据模型、域包（domain pack）抽象、产物模型扩展 | 🚧 |
 | P1.5 | **规范执行层**：L1 命令/工具、L3 请求与响应、L2 出网强制、判定审计链 | ✅ |
-| P1.6 | hold 生命周期（全量停止 → 操作员答复 → 恢复）、审批 UI | 🚧 |
-| P1.7 | `/api/auth/init` 一次性 setup token + 前端配合 | 📋 |
-| P2 | 离线域包：`binary_re`（radare2-mcp / Ghidra headless）、`malware_triage`（capa/YARA/FLOSS）、`source_audit`（Semgrep CE/Joern） | 📋 |
+| P1.6 | hold 生命周期（全量停止 → 操作员答复 → 恢复 → 任务暂停/续跑）、操作台 | ✅ |
+| P1.7 | `/api/auth/init` 一次性 setup token + 前端配合 | ✅ |
+| P2 | 离线域包：`binary_re`（radare2-mcp / Ghidra headless）、`malware_triage`（capa/YARA/FLOSS）、`source_audit`（Semgrep CE/Joern） | 🚧 |
 | P2.5 | 0day 流水线：攻击面提取 → 候选 → 可达性 → **触发验证**（无 PoC 不算 finding） | 📋 |
 | P3 | 在线域包：`web_pentest`（继承 ARTEX）+ `bounty_recon` + CDP 浏览器分析 | 🚧 |
 | P4 | 蓝队域包（检测工程 + agentic 攻击者检测规则）、多域报告、测评台（XBOW 104） | 📋 |
@@ -140,6 +140,21 @@ curl /api/policy/holds                        # 看当前挂起与问题
 curl -X POST /api/policy/holds/{id}/answer \
      -d '{"answer":"已确认在授权范围内","resume":true}'   # 明确答复后才恢复
 ```
+
+### 3.5 接入逆向 / 审计工具（MCP 工具模板）
+
+**系统 → MCP → 工具模板** 里预置了 9 个常用服务器，点"使用"会预填命令与参数，保存前可改：
+
+| 类别 | 模板 | 说明 |
+|---|---|---|
+| 逆向 | radare2 MCP（MIT）、IDA MCP（idalib 无头）、IDA MCP（Hex-Rays 官方）、Ghidra MCP（无头）、ReVa | 只读反汇编/反编译、函数与 xref、结构体重命名；IDA 两个模板需商业授权（IDA 8.3+/9.4+） |
+| 浏览器 | Playwright MCP、Chrome DevTools MCP | 前端挖掘（隐藏接口、鉴权绕过、客户端原型污染）与网络/性能取证；两者都不是安全边界，工具调用仍走 guard 审批 |
+| 审计 | Semgrep MCP | 规则化 SAST、变体搜索 |
+| 情报 | VirusTotal MCP（托管 http） | 样本/域名/IP 情报；哈希会外发，客户内部样本先确认授权 |
+
+模板只做预填，**不替你决定命令**：这些工具自身在快速演进（IDA 的 GUI 插件路径已被官方弃用、
+Ghidra/ReVa 的启动方式随版本变），每条模板都带安装方式与注意事项，接不通时按提示核对命令即可。
+工具接进来后仍受 L1 判定约束（内联解释器、敏感文件读取、目标越界等），不是绕开策略的旁路。
 
 ### 4. 锁定出网（L2，强烈建议）
 

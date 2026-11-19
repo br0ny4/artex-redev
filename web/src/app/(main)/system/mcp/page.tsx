@@ -1,27 +1,22 @@
 "use client";
 
 import * as React from "react";
-import { toast } from "sonner";
-import { PlusIcon, RefreshCwIcon, ServerIcon, Trash2Icon } from "lucide-react";
 
+import { PlusIcon, RefreshCwIcon, ServerIcon, SparklesIcon, Trash2Icon } from "lucide-react";
+import { toast } from "sonner";
+
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
-import { Badge } from "@/components/ui/badge";
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Switch } from "@/components/ui/switch";
-import { Checkbox } from "@/components/ui/checkbox";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import {
-  Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-  SheetDescription,
-} from "@/components/ui/sheet";
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Textarea } from "@/components/ui/textarea";
 import { api } from "@/lib/api";
-import type { MCPServer, MCPTool, Agent } from "@/lib/types";
+import type { Agent, MCPPreset, MCPServer, MCPTool } from "@/lib/types";
 
 type Transport = "stdio" | "http" | "sse";
 type FormState = {
@@ -43,8 +38,19 @@ const emptyForm: FormState = {
   insecure: false,
 };
 
+function presetCategoryLabel(category: string): string {
+  if (category === "reverse") return "逆向";
+  if (category === "browser") return "浏览器";
+  if (category === "audit") return "审计";
+  if (category === "intel") return "情报";
+  return category;
+}
+
 export default function MCPPage() {
   const [servers, setServers] = React.useState<MCPServer[]>([]);
+  const [presets, setPresets] = React.useState<MCPPreset[]>([]);
+  // 从模板预填时的备注（安装前置条件、外发提醒），保存前一直显示在表单顶部。
+  const [presetHint, setPresetHint] = React.useState<string | null>(null);
   const [agents, setAgents] = React.useState<Agent[]>([]);
   const [visibility, setVisibility] = React.useState<Record<number, string[]>>({});
 
@@ -58,7 +64,14 @@ export default function MCPPage() {
   const [refreshing, setRefreshing] = React.useState(false);
 
   const load = React.useCallback(() => {
-    api.agents().then(setAgents).catch(() => {});
+    api
+      .agents()
+      .then(setAgents)
+      .catch(() => {});
+    api
+      .mcpPresets()
+      .then(setPresets)
+      .catch(() => {});
     api
       .mcpServers()
       .then((ss) => {
@@ -101,9 +114,28 @@ export default function MCPPage() {
 
   function openAdd() {
     setEditing(null);
+    setPresetHint(null);
     setForm(emptyForm);
     setTools([]);
     setTab("config");
+    setOpen(true);
+  }
+
+  // 模板只做预填：命令、参数、环境变量都能改，保存仍走普通新增（含首次添加后的工具发现）。
+  function applyPreset(p: MCPPreset) {
+    setEditing(null);
+    setTab("config");
+    setTools([]);
+    setForm({
+      name: p.name,
+      transport: p.transport,
+      command: p.command ?? "",
+      args: (p.args ?? []).join(" "),
+      url: p.url ?? "",
+      env: (p.env ?? []).map((k) => `${k}=`).join("\n"),
+      insecure: false,
+    });
+    setPresetHint([p.desc, p.install ? `安装：${p.install}` : "", p.note ?? ""].filter(Boolean).join("\n"));
     setOpen(true);
   }
 
@@ -231,6 +263,11 @@ export default function MCPPage() {
   function renderForm() {
     return (
       <div className="grid gap-4 py-4">
+        {presetHint ? (
+          <div className="bg-muted/50 text-muted-foreground whitespace-pre-line rounded-lg border border-dashed p-3 text-xs leading-relaxed">
+            {presetHint}
+          </div>
+        ) : null}
         <div className="grid gap-2">
           <Label>传输方式</Label>
           <div className="flex gap-2">
@@ -300,10 +337,7 @@ export default function MCPPage() {
               onChange={(e) => setF({ url: e.target.value })}
             />
             <label className="flex items-center gap-2 text-sm">
-              <Checkbox
-                checked={form.insecure}
-                onCheckedChange={(v) => setF({ insecure: v === true })}
-              />
+              <Checkbox checked={form.insecure} onCheckedChange={(v) => setF({ insecure: v === true })} />
               跳过 TLS 证书校验（自签证书）
             </label>
           </div>
@@ -317,9 +351,7 @@ export default function MCPPage() {
           <Textarea
             id="m-env"
             className="font-mono"
-            placeholder={
-              form.transport !== "stdio" ? "Authorization=Bearer xxxx" : "API_KEY=xxxx\nFOO=bar"
-            }
+            placeholder={form.transport !== "stdio" ? "Authorization=Bearer xxxx" : "API_KEY=xxxx\nFOO=bar"}
             value={form.env}
             onChange={(e) => setF({ env: e.target.value })}
           />
@@ -347,9 +379,7 @@ export default function MCPPage() {
               <div key={t.name} className="py-2.5">
                 <code className="font-mono text-sm">{t.name}</code>
                 {t.description && (
-                  <p className="text-muted-foreground mt-0.5 text-xs leading-relaxed">
-                    {t.description}
-                  </p>
+                  <p className="text-muted-foreground mt-0.5 text-xs leading-relaxed">{t.description}</p>
                 )}
               </div>
             ))}
@@ -390,17 +420,8 @@ export default function MCPPage() {
                   {s.transport}
                 </Badge>
                 <div className="ml-auto flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
-                  <Switch
-                    checked={s.enabled}
-                    onCheckedChange={() => toggleEnabled(s)}
-                    aria-label="启用"
-                  />
-                  <Button
-                    size="icon"
-                    variant="outline"
-                    aria-label="删除"
-                    onClick={() => removeServer(s)}
-                  >
+                  <Switch checked={s.enabled} onCheckedChange={() => toggleEnabled(s)} aria-label="启用" />
+                  <Button size="icon" variant="outline" aria-label="删除" onClick={() => removeServer(s)}>
                     <Trash2Icon className="text-destructive" />
                   </Button>
                 </div>
@@ -429,16 +450,58 @@ export default function MCPPage() {
         ))}
       </div>
 
+      {presets.length > 0 ? (
+        <div className="flex flex-col gap-3">
+          <div className="flex items-center gap-2">
+            <SparklesIcon className="text-muted-foreground size-4" />
+            <h2 className="text-sm font-medium">工具模板</h2>
+            <span className="text-muted-foreground text-xs">
+              逆向 / 浏览器 / 审计 / 情报常用的 MCP 服务器，点一下预填，再按需改命令
+            </span>
+          </div>
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
+            {presets.map((p) => (
+              <Card key={p.key} className="gap-2 p-4">
+                <div className="flex items-center gap-2">
+                  <CardTitle className="text-sm">{p.name}</CardTitle>
+                  <Badge variant="outline" className="uppercase">
+                    {presetCategoryLabel(p.category)}
+                  </Badge>
+                  {p.requires_id ? (
+                    <Badge variant="secondary" className="text-[10px]">
+                      需 IDA 授权
+                    </Badge>
+                  ) : null}
+                </div>
+                <p className="text-muted-foreground text-xs leading-relaxed">{p.desc}</p>
+                {p.note ? <p className="text-muted-foreground/80 text-[11px] leading-relaxed">{p.note}</p> : null}
+                {p.install ? (
+                  <code className="bg-muted rounded px-1.5 py-1 font-mono text-[11px] break-all">{p.install}</code>
+                ) : null}
+                <div className="mt-1 flex items-center gap-3">
+                  <Button size="sm" variant="outline" onClick={() => applyPreset(p)}>
+                    <PlusIcon /> 使用
+                  </Button>
+                  <a
+                    href={p.doc}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-muted-foreground hover:text-foreground text-xs underline-offset-2 hover:underline"
+                  >
+                    文档
+                  </a>
+                </div>
+              </Card>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
       <Sheet open={open} onOpenChange={setOpen}>
-        <SheetContent
-          side="right"
-          className="w-full data-[side=right]:sm:max-w-lg"
-        >
+        <SheetContent side="right" className="w-full data-[side=right]:sm:max-w-lg">
           <SheetHeader>
             <SheetTitle>{editing ? editing.name : "添加 MCP 服务器"}</SheetTitle>
-            <SheetDescription>
-              stdio（本地起进程）或 http（远程 Streamable HTTP）
-            </SheetDescription>
+            <SheetDescription>stdio（本地起进程）或 http（远程 Streamable HTTP）</SheetDescription>
           </SheetHeader>
 
           {editing ? (
@@ -449,9 +512,7 @@ export default function MCPPage() {
             >
               <TabsList>
                 <TabsTrigger value="config">配置</TabsTrigger>
-                <TabsTrigger value="tools">
-                  工具列表{tools.length ? `（${tools.length}）` : ""}
-                </TabsTrigger>
+                <TabsTrigger value="tools">工具列表{tools.length ? `（${tools.length}）` : ""}</TabsTrigger>
               </TabsList>
               <TabsContent value="config" className="min-h-0 flex-1 overflow-y-auto">
                 {renderForm()}

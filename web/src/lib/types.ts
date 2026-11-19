@@ -1186,6 +1186,25 @@ export interface MCPTool {
   description: string;
 }
 
+// 工具模板：只用于预填新增表单，保存仍走普通 POST /api/mcp。
+// 命令行为什么常变：这些工具自身在快速演进（IDA 的 GUI 插件路径已被官方弃用），
+// 所以每条都带 install/note，让使用者知道跑之前要满足什么。
+export interface MCPPreset {
+  key: string;
+  name: string;
+  category: "reverse" | "browser" | "audit" | "intel" | string;
+  transport: "stdio" | "http" | "sse";
+  command?: string;
+  args?: string[];
+  url?: string;
+  env?: string[];
+  desc: string;
+  install?: string;
+  doc: string;
+  note?: string;
+  requires_id?: boolean;
+}
+
 // ---- Skills ----
 // Fields align with the agentskills.io open specification.
 // description covers both "what the skill does" and "when to use it".
