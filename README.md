@@ -7,6 +7,7 @@
 从「一条指令打到穿」走向「有硬边界的作业台 + 离线分析域」：在线授权测试、二进制逆向、
 源码审计、恶意样本分析、蓝队检测，共用一套策略执行层与证据链。
 
+[![ci](https://github.com/br0ny4/artex-redev/actions/workflows/ci.yml/badge.svg)](https://github.com/br0ny4/artex-redev/actions/workflows/ci.yml)
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](LICENSE)
 [![Go](https://img.shields.io/badge/Go-1.26-00ADD8.svg)](go.mod)
 [![Status](https://img.shields.io/badge/status-alpha-orange.svg)](docs/redev/05-decisions.md)
@@ -167,7 +168,8 @@ skills/      内置 skill
 - 分支：`main` 保持可构建、可测试；功能在 `feat/*` 分支开发后合入。
 - 提交规范：`type(scope): summary`（feat/fix/refactor/docs/test/chore/security）。
 - 每个安全相关改动**必须带回归测试**；策略层改动还要补合规矩阵用例。
-- 提交前跑：`go build ./... && go vet ./... && go test ./...`（server/db 部分用例需要 PostgreSQL）。
+- 提交前跑：`go build ./... && go vet ./... && go test ./...`（需要 PostgreSQL；CI 的串行策略与
+  已知 flake 清单见 [`docs/redev/06-ci.md`](docs/redev/06-ci.md)）。
 - 安全问题请走私密渠道（见 [`SECURITY.md`](SECURITY.md)），不要公开提 issue。
 
 ## 致谢
