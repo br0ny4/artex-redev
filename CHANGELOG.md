@@ -2,6 +2,31 @@
 
 本项目的重要变更记录在此文件中，格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [Fork-0.2.0] - 2026-11-19
+
+### 新增
+
+- **全局挂起（Stop-All）**：范围归属不明 / 接口语义判不清 / 预算耗尽时，平台挂起整个
+  engagement（不是只挡一条请求），把问题原样转给操作员；未获明确答复前所有请求与命令
+  均被挡下（规范 7.3）。`policy/hold.go` + `db/policy_holds.go` + `/api/policy/holds`，
+  操作员答复并 `resume=true` 后才恢复。
+- **规范执行操作台 `/system/policy`**：全量停止横幅（答复分"仅记录"与"答复并恢复"两档）、
+  执行层状态与授权上下文摘要、挂起列表与操作员答复、最近 100 条判定流水、审计链一键校验。
+  挂起状态 5s 轮询——操作员不该靠刷新才发现测试停了。
+- **初始化口令**：`/api/auth/init` 必须携带启动日志打印的一次性口令（可用
+  `ARTEX_SETUP_TOKEN` 固定），并有失败限速；setup 页新增口令输入框。未认证抢占是公网
+  实例最常见失陷路径。
+
+### 变更
+
+- `/api/policy/status` 的授权上下文改用 snake_case 字段（`Engagement`/`Window`/`EngScope`
+  补 json tag），此前返回的是 Go 字段名，前端无法直接消费。
+
+### 修复
+
+- CI 单元测试对**失败的包**自动重跑一次：上游遗留用例在测试结束后仍有后台协程写工作
+  目录（`TempDir RemoveAll: directory not empty`），按用例名 skip 是打地鼠。
+
 ## [Fork-0.1.0] - 2026-11-19
 
 本仓库（**ARTEX-redev**，ARTEX v0.3.15 的二次开发版）的首个发布点。
@@ -36,18 +61,6 @@
 
 - 相对上游的完整差异清单见 `NOTICE`；设计与取舍见 `docs/redev/05-decisions.md`。
 - 本版本**不包含**上游 README 之外的任何私有资料；`policy/spec/` 只留占位文件。
-
-## [Unreleased]
-
-### 新增
-
-- **全局挂起（Stop-All）**：范围归属不明 / 接口语义判不清 / 预算耗尽时，平台挂起整个
-  engagement（不是只挡一条请求），把问题原样转给操作员；未获明确答复前所有请求与命令
-  均被挡下（规范 7.3）。`policy/hold.go` + `db/policy_holds.go` + `/api/policy/holds`，
-  操作员答复并 `resume=true` 后才恢复。
-- **初始化口令**：`/api/auth/init` 必须携带启动日志打印的一次性口令（可用
-  `ARTEX_SETUP_TOKEN` 固定），并有失败限速；setup 页新增口令输入框。未认证抢占是公网
-  实例最常见失陷路径。
 
 ## [0.3.15] - 2026-10-07
 

@@ -90,6 +90,9 @@ go build -o artex ./cmd/artex        # 需要 Go 1.26+
 
 需要 PostgreSQL（`ARTEX_PG_DSN` 或 `config.json`）；首次打开 `/setup` 设置管理员密码。
 
+启动日志会打印一行初始化口令，`/setup` 要求填入——没有它任何人都能在设密码前抢占实例
+（公网裸奔控制台最常见的失陷路径）。也可用 `ARTEX_SETUP_TOKEN` 固定。
+
 ### 2. Docker Compose
 
 ```bash
@@ -97,7 +100,8 @@ cp .env.example .env                 # 填 POSTGRES_PASSWORD
 docker compose up -d                 # 镜像来自 ghcr.io/br0ny4/artex-redev
 ```
 
-镜像尚未发布到 GHCR 时，用源码本地构建：
+镜像按 tag 发布（`ghcr.io/br0ny4/artex-redev:v0.2.0`，`latest` 指向最新版本）。
+需要自己改工具链时用源码构建：
 
 ```bash
 ./build-image.sh                     # 内部走 Dockerfile.local，构建后启动
