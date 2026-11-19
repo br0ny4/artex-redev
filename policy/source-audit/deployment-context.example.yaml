@@ -1,0 +1,71 @@
+# =====================================================================
+# 部署上下文 · 源码审计域（source_audit）
+#
+# 这里的"授权范围"是本地源码目录清单：允许读哪些仓库/目录、产物写到哪里。
+# 缺该项时只允许被动分析（读已挂载目录、不跑任何写操作、不出网）。
+# =====================================================================
+
+engagement:
+  id: SRC-2026-001
+  client: 示例软件公司
+  title: 核心网关源码安全审计（0day 挖掘）
+  authorization_doc: ./docs/authorization/SRC-2026-001.pdf
+  authorization_doc_sha256: "0000000000000000000000000000000000000000000000000000000000000000"
+  pack: source-audit              # ← 选择源码审计域策略包
+  window:
+    starts_at: "2026-11-20T00:00:00+08:00"
+    ends_at: "2026-11-27T23:59:59+08:00"
+    timezone: Asia/Shanghai
+  contacts:
+    operator: 张三 <zhangsan@example.com>
+    client_poc: 李四 <lisi@example.com>
+    report_channel: https://src.example.com/report/SRC-2026-001
+
+# --- 必填 1：源码目录清单（只读副本；产物目录另配）---
+scope:
+  domains: []                     # 源码审计不设网络目标
+  ips: []
+  cidrs: []
+  apps: []
+  apis: []
+  local_paths:
+    - /srv/audit/gateway            # 只读挂载的仓库副本
+    - /srv/audit/gateway-deps       # 依赖/第三方库（供应链审计）
+  notes: |
+    只读副本，禁止原地修改；补丁与 PoC 写到 artifacts 目录。凭据、密钥、客户数据
+    一律不出网，报告里按规范脱敏。
+  exclude:
+    - /srv/audit/gateway/vendor/internal-pay   # 客户明确排除
+  allowed_egress:
+    - https://src.example.com/report/SRC-2026-001
+
+# --- 必填 2：审计工具（本地静态分析）---
+test_accounts: []                 # 源码审计不碰账号体系
+allowed_tools:
+  always: [rg, semgrep, ast-grep, joern, tree-sitter, git, jq, sha256sum]
+  per_use:
+    - joern                       # 全量 CPG 构建较慢，按需
+    - semgrep                     # 自定义规则需操作员确认
+  denied: [ssh, scp, rsync, nc, curl, wget, git-push]
+
+# --- 必填 3：报告出口 ---
+report:
+  channel: https://src.example.com/report/SRC-2026-001
+  format: markdown
+  attachments_allowed: [txt, json, patch, png]
+
+# --- 必填 4：产物目录（报告/补丁/PoC 唯一落点）---
+artifacts:
+  dir: ./artifacts/SRC-2026-001
+  max_total_mb: 200
+  purge_after_report: true
+  purge_grace_days: 14
+
+budget_overrides:
+  total_requests_per_task: 20      # 只发报告，不需要更多
+  response_body_max_mb: 10
+
+compliance:
+  spec_version: "2.5"
+  handshake: "[RULES_LOADED v2.5]"
+  operator_acknowledged: true

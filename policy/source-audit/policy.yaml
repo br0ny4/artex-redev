@@ -1,0 +1,203 @@
+# =====================================================================
+# 源码审计域策略包（source_audit）— 机器可读执行配置
+#
+# 依据：本仓库 docs/redev/07-domain-packs.md。执行层契约与在线域相同
+# （fail-closed、全量停止、判定审计、预算熔断），差异在：
+#
+#   - 目标是**本地源码仓库的只读副本**，不是网络资产；
+#   - 越界 = 源码/片段/凭据外发（改成报告通道以外的任何目的地）；
+#   - 红线 = 改动被审计源码（证据被破坏）、把代码推送到远端仓库；
+#   - 正常作业基本零出网：审计工具（semgrep / Joern / rg / ast-grep）本地跑，
+#     只有"提交报告"这一步走平台报告通道。
+#
+# 诚实说明（勿当保证）：平台能拦已知工具与已知目的地，但"把代码片段贴进
+# 任意允许域名"这类通道判定尚无谓词；当前靠出网白名单 + L2 出网收口兜底。
+# =====================================================================
+
+spec:
+  id: offline-source-audit
+  version: "2.5"                     # 复用同一套执行层契约版本，避免两套 spec 漂移
+  handshake: "[RULES_LOADED v2.5]"
+  fail_mode: closed
+
+engagement_requirements:
+  test_accounts: false               # 源码审计不碰目标账号体系
+
+enforcement:
+  mode: hard
+  layers:
+    - artifact_fs                    # 只读副本 + 产物目录（报告/补丁）
+    - tool_guard                     # PreToolUse：审计工具白名单，禁外传类命令
+    - egress_allowlist               # 默认零出网，只有报告通道
+    - request_proxy                  # 报告提交同样受范围与预算约束
+    - hold_controller                # 判不清 → 全量停止
+  on_violation:
+    action: deny
+    hold_task: true
+    notify: operator
+
+# ---------------------------------------------------------------------
+# 授权范围：源码目录清单（local_paths），不是域名清单
+# ---------------------------------------------------------------------
+scope:
+  require_deployment_context: true
+  deny_by_default: true
+  allow: []
+  exclude: []
+  ambiguous_as_out_of_scope: true
+  third_party_detect:
+    cname_suffix: []
+    asn_lookup: false
+    require_explicit: true
+  internal_cidrs_deny:               # 源码审计不需要访问任何内网地址
+    - 10.0.0.0/8
+    - 172.16.0.0/12
+    - 192.168.0.0/16
+    - 127.0.0.0/8
+    - 169.254.0.0/16
+    - "::1/128"
+    - "fc00::/7"
+  metadata_deny: ["169.254.169.254", "fd00::ec2::254"]
+  out_of_band_allow_suffixes: []      # 默认不带外带通道
+  egress_allowlist_extra: []          # 审计不需要情报回源；需要时在上下文显式加
+  budget_expansion:
+    reached_but_no_further_requests: true
+
+# ---------------------------------------------------------------------
+# 一票否决红线（源码审计版本）
+# ---------------------------------------------------------------------
+redlines:
+  - id: R1_destructive              # 删除/改写被审计源码
+    deny_when: request_class_in [A, B]
+  - id: R2_bulk_export              # 批量导出源码/文件清单
+    deny_when: response_rows_over_budget OR pagination_unbounded
+  - id: R3_dos
+    deny_when: rate_over_budget OR concurrency_over_budget
+  - id: R4_internal_lateral
+    deny_when: resolved_ip_in_internal_cidrs
+  - id: R8_exfil                    # 本域最重要的一条：源码不得出网
+    deny_when: egress_target_not_in [report_channel]
+  - id: R9_money
+    deny_when: benefit_or_payment_action
+  - id: R14_source_modify           # 被审计源码只读；修补丁要写到产物目录
+    deny_when: write_into_audited_repo_without_approval
+  - id: R15_source_publish          # git push / 上传代码到远端 = 越过红线
+    deny_when: publish_code_to_remote_without_approval
+
+# ---------------------------------------------------------------------
+# 接口语义分级（报告提交仍走 HTTP，语义与在线域同构）
+# ---------------------------------------------------------------------
+classes:
+  A_delete_clear_destroy:  deny
+  B_overwrite_reset_merge: deny
+  C_generic_modify:        restrict
+  D_state_transition:      restrict
+  E_create:                conditional
+  F_read:                  allow
+  unknown:                 deny
+semantics:
+  match_surface: [method, path, query_keys, query_values, body_keys, body_values, headers]
+  apply_order: [rest_method, explicit_verb, param_switch, batch_pattern, chinese_pinyin, llm_fallback]
+  obfuscation_is_violation: true
+  llm_fallback:
+    enabled: true
+    default_on_low_confidence: deny
+    log_decision: true
+
+# ---------------------------------------------------------------------
+# 预算：审计是本地计算为主，网络侧极紧（只提交报告）
+# ---------------------------------------------------------------------
+budget:
+  sql_proof: identity_functions
+  vuln_samples: 1
+  internal_lateral_hosts: 0
+  send_actions: 0
+  pii_active_fetch: 0
+  response_body_max_mb: 20
+  test_accounts: 0
+  rate_rps_per_host: 1
+  concurrency_per_host: 1
+  retry_max: 1
+  total_requests_per_task: 50        # 兜底：审计作业不该反复发包
+  scanner_burst_max: 20
+  window: engagement_window
+  stop_at_expiry: true
+
+# ---------------------------------------------------------------------
+# 工具：审计工具必须可用；能把源码送出去的工具默认禁用
+# ---------------------------------------------------------------------
+tools:
+  default_deny_binaries:
+    - ssh
+    - scp
+    - rsync
+    - nc
+    - ncat
+    - socat
+    - curl
+    - wget
+  approval: { scope: per_use, target_checked: true, read_only_only: true }
+  no_self_tuning: [rate, concurrency, timeout, retry]
+  no_probe_first: true
+  script_requires_counters: true
+  attribution: per_request
+
+# ---------------------------------------------------------------------
+# 响应检查：源码里天然有密钥/凭据，命中即截断，原文不进模型上下文
+# ---------------------------------------------------------------------
+response:
+  max_body_mb: 20
+  stop_on_secret_patterns: true
+  secret_patterns_ref: policy/patterns/secret.txt
+  row_counting:
+    prefer_total_fields: true
+    sample_rows_max: 3
+  pii_detector: { enabled: true, min_hits_to_count: 3 }
+
+# ---------------------------------------------------------------------
+# 终止与配合
+# ---------------------------------------------------------------------
+stop:
+  immediate_on:
+    - budget_exhausted
+    - secret_hit
+    - scope_uncertain
+    - source_upload_attempt
+    - source_modify_attempt
+    - operator_hold
+  stop_all: true
+  keep_context_for_report: true
+  resume_requires: explicit_operator_answer
+  ambiguous_answer: ask_again
+  anomaly_detect:
+    http_5xx_rate: 0.2
+    waf_block_page: true
+    body_change_detect: false
+    notify_operator: true
+
+# ---------------------------------------------------------------------
+# 上报：结论必须可复现（文件位置 + 工具版本 + 规则/查询）
+# ---------------------------------------------------------------------
+report:
+  required_fields:
+    - title
+    - vuln_class
+    - severity
+    - evidence
+    - repro_steps
+    - data_minimization_note
+    - cleanup_status
+    - product_artifacts
+    - rating_basis
+  redact: [secret, pii, source_code, credential]
+  one_finding_one_report: true
+  rating: objective_only
+  artifacts_dir: ./artifacts
+  purge_after_report: true
+
+compliance:
+  handshake_required: true
+  deployment_context_required: true
+  passive_only_when_context_missing: true
+  spec_version_pinned: "2.5"
+  strict_interpretation: true

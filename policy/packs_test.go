@@ -14,7 +14,7 @@ import (
 func TestAvailablePacks(t *testing.T) {
 	got := AvailablePacks()
 	joined := strings.Join(got, ",")
-	for _, want := range []string{"web-pentest", "binary-re"} {
+	for _, want := range []string{"web-pentest", "binary-re", "source-audit"} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("域包列表缺少 %s：%v", want, got)
 		}
@@ -48,6 +48,58 @@ func TestPackConfigBinaryRE(t *testing.T) {
 	}
 	if def.Pack != DefaultPack || def.Spec.ID != "src-authorized-asset-test" {
 		t.Fatalf("默认包被污染：pack=%q id=%q", def.Pack, def.Spec.ID)
+	}
+}
+
+// 源码审计域的差异点：没有网络目标（范围是 local_paths）、默认零出网、代码外发需授权。
+func TestPackConfigSourceAudit(t *testing.T) {
+	cfg, err := PackConfig("source-audit")
+	if err != nil {
+		t.Fatalf("加载 source-audit: %v", err)
+	}
+	if cfg.Spec.ID != "offline-source-audit" {
+		t.Fatalf("spec.id=%q", cfg.Spec.ID)
+	}
+	if len(cfg.Scope.EgressAllowlistExtra) != 0 {
+		t.Fatalf("源码审计默认不该有情报回源：%v", cfg.Scope.EgressAllowlistExtra)
+	}
+	// 能把源码送出去的命令默认禁用。
+	deny := strings.Join(cfg.Tools.DefaultDenyBinaries, ",")
+	for _, want := range []string{"ssh", "scp", "curl", "wget"} {
+		if !strings.Contains(deny, want) {
+			t.Fatalf("未禁用外传类命令 %s：%v", want, cfg.Tools.DefaultDenyBinaries)
+		}
+	}
+}
+
+// 端到端：源码审计模板用 local_paths 作授权范围（没有域名），能装上且判定生效。
+func TestInstallSourceAuditPack(t *testing.T) {
+	raw, err := os.ReadFile("source-audit/deployment-context.example.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	text := strings.ReplaceAll(string(raw), "2026-11-20T00:00:00+08:00",
+		now.Add(-24*time.Hour).Format("2006-01-02T15:04:05-07:00"))
+	text = strings.ReplaceAll(text, "2026-11-27T23:59:59+08:00",
+		now.Add(24*time.Hour).Format("2006-01-02T15:04:05-07:00"))
+	ctxPath := filepath.Join(t.TempDir(), "context.yaml")
+	if err := os.WriteFile(ctxPath, []byte(text), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	eng, err := InstallFromFile(ctxPath)
+	if err != nil {
+		t.Fatalf("按源码审计模板安装: %v", err)
+	}
+	defer Install(nil)
+	if eng.Pack() != "source-audit" {
+		t.Fatalf("pack=%q want source-audit", eng.Pack())
+	}
+	if len(eng.Engagement().Scope.LocalPaths) == 0 {
+		t.Fatal("local_paths 没进引擎范围，审计就无从谈授权")
+	}
+	if d := eng.DecideRequest(context.Background(), "t", req("GET", "unknown.example.net", "/")); d.Action == ActionAllow {
+		t.Fatalf("源码审计域不该允许出网，得到 %v(%s)", d.Action, d.Reason)
 	}
 }
 

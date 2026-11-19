@@ -69,7 +69,7 @@ FLASH 通报，全球金融/政府/科技/国防等行业受影响；公网上�
 | P1.5 | **规范执行层**：L1 命令/工具、L3 请求与响应、L2 出网强制、判定审计链 | ✅ |
 | P1.6 | hold 生命周期（全量停止 → 操作员答复 → 恢复 → 任务暂停/续跑）、操作台 | ✅ |
 | P1.7 | `/api/auth/init` 一次性 setup token + 前端配合 | ✅ |
-| P2 | 离线域包：`binary_re`（radare2-mcp / Ghidra headless）✅、`malware_triage`（capa/YARA/FLOSS）、`source_audit`（Semgrep CE/Joern） | 🚧 |
+| P2 | 离线域包：`binary_re`（radare2-mcp / Ghidra headless）✅、`source_audit`（Semgrep/Joern/ast-grep）✅、`malware_triage`（capa/YARA/FLOSS） | 🚧 |
 | P2.5 | 0day 流水线：攻击面提取 → 候选 → 可达性 → **触发验证**（无 PoC 不算 finding） | 📋 |
 | P3 | 在线域包：`web_pentest`（继承 ARTEX）+ `bounty_recon` + CDP 浏览器分析 | 🚧 |
 | P4 | 蓝队域包（检测工程 + agentic 攻击者检测规则）、多域报告、测评台（XBOW 104） | 📋 |
@@ -177,6 +177,23 @@ export ARTEX_ENGAGEMENT_FILE=./policy/binary-re/deployment-context.yaml
 外传。前者靠沙箱声明 + L2 出网收口 + guard 审批兜，后者依赖出网白名单阻挡目的地。
 详见 [`docs/redev/07-domain-packs.md`](docs/redev/07-domain-packs.md)。
 
+### 3.7 源码审计与 0day 挖掘（source-audit 域包）
+
+审计客户源码时用独立域包，授权范围是**目录清单**而不是域名：
+
+```bash
+cp policy/source-audit/deployment-context.example.yaml policy/source-audit/deployment-context.yaml
+# 填：local_paths（只读副本目录）、产物目录、报告出口、授权时间窗
+export ARTEX_ENGAGEMENT_FILE=./policy/source-audit/deployment-context.yaml
+./artex                                # 启动日志会打印 pack=source-audit
+```
+
+- 默认**零出网**：审计工具（semgrep / Joern / ast-grep / rg / tree-sitter）本地跑，
+  只有报告通道可用；需要拉规则/查 CVE 要显式加白名单。
+- 被审计源码只读：原地改源码命中红线，补丁与 PoC 只能写进产物目录。
+- `ssh`/`scp`/`rsync`/`nc`/`curl`/`wget` 等外传类命令默认禁用；`git push` 归 D 类需显式授权。
+- 接 `semgrep mcp` / 本地 MCP 审计服务器见 3.5，工具调用仍走 guard 判定。
+
 ### 4. 锁定出网（L2，强烈建议）
 
 只靠代理挡不住 `nmap`/裸 TCP。把容器出口收口到唯一代理：
@@ -194,6 +211,7 @@ agent/       Agent 运行时：目标拆解 → 规划 → 执行 → 复测
 policy/      规范执行层：范围/语义分级/预算/命令/响应检查/审计（纯 Go，可单测）
              web-pentest/  在线测试域包（授权范围/测试账号/扫描器审批）
              binary-re/    离线二进制分析域包（情报回源白名单/禁宿主模拟器/送检审批）
+             source-audit/ 源码审计域包（目录清单授权/零出网/禁外传命令）
              patterns/secret.txt   敏感特征（RE2）
 traffic/     录制代理（mitmproxy）+ L3 判定出口
 guard/       工具调用前置钩子（L1）

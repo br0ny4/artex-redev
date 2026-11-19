@@ -209,9 +209,12 @@ type EngScope struct {
 	CIDRs   []string `yaml:"cidrs" json:"cidrs"`
 	Apps    []string `yaml:"apps" json:"apps"`
 	APIs    []string `yaml:"apis" json:"apis"`
-	Notes   string   `yaml:"notes" json:"notes"`
-	Exclude []string `yaml:"exclude" json:"exclude"`
-	Egress  []string `yaml:"allowed_egress" json:"allowed_egress"`
+	// LocalPaths 是"本地产物/源码目录"授权清单：离线域没有网络目标，范围就是
+	// 允许读哪些本地目录。在线域留空即可（避免把"路径"误当发包范围）。
+	LocalPaths []string `yaml:"local_paths" json:"local_paths"`
+	Notes      string   `yaml:"notes" json:"notes"`
+	Exclude    []string `yaml:"exclude" json:"exclude"`
+	Egress     []string `yaml:"allowed_egress" json:"allowed_egress"`
 }
 
 type Account struct {
@@ -342,8 +345,8 @@ func (e *Engagement) validate(req EngagementRequirements) error {
 	if _, err := e.End(); err != nil {
 		missing = append(missing, "engagement.window.ends_at")
 	}
-	if len(e.Scope.Domains)+len(e.Scope.IPs)+len(e.Scope.CIDRs)+len(e.Scope.Apps)+len(e.Scope.APIs) == 0 {
-		missing = append(missing, "scope（至少一项 domain/ip/cidr/app/api）")
+	if len(e.Scope.Domains)+len(e.Scope.IPs)+len(e.Scope.CIDRs)+len(e.Scope.Apps)+len(e.Scope.APIs)+len(e.Scope.LocalPaths) == 0 {
+		missing = append(missing, "scope（至少一项 domain/ip/cidr/app/api/local_paths）")
 	}
 	if len(e.Accounts) == 0 && req.TestAccounts {
 		missing = append(missing, "test_accounts（C/D/E 类操作需要）")

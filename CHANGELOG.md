@@ -20,6 +20,11 @@
   默认禁用，情报查询 200 次/任务、1 rps、响应体 50MB 截断；红线新增 `R12_sample_upload`、
   `R13_host_execution`，全量停止条件新增送检/宿主执行尝试；离线词表把 `submit`/`upload`/
   `detonate` 归为 D 类（需显式授权）。附 `deployment-context.example.yaml` 模板。
+- **source-audit 源码审计域包**：授权范围改为目录清单（`scope.local_paths`），默认零出网
+  （只有报告通道），被审计源码只读、补丁/PoC 只能写产物目录；`ssh`/`scp`/`rsync`/`nc`/`curl`/
+  `wget` 等外传类命令默认禁用；红线新增 `R14_source_modify`、`R15_source_publish`，
+  全量停止条件新增源码外发/原地修改尝试；审计词表覆盖 semgrep/Joern/ast-grep/taint/dataflow。
+  README 新增「3.7 源码审计与 0day 挖掘」。
 - `deploy` 之外新增文档：README「3.6 离线分析」与「3.5 MCP 工具模板」两节。
 
 ### 变更

@@ -1,0 +1,229 @@
+# =====================================================================
+# 源码审计域语义词表（source_audit）
+#
+# 分类标准仍是"动作后果"。源码审计的动作面三类：
+#   1) 读代码/跑静态分析（rg、semgrep、Joern、ast-grep、tree-sitter）→ F 类
+#   2) 写产物（报告、补丁、PoC 文件，只能落在产物目录）→ E 类
+#   3) 把代码送出去（git push、上传、贴到工单/第三方）→ D 类，需显式授权
+# 与在线域不同：这里"修改"多半不是打接口，而是改文件；A/B 类命中即红线，
+# 因为被审计源码是证据，改一行就不是原样了。
+# =====================================================================
+
+normalize:
+  lowercase: true
+  strip_separators: "_-"
+  split_camel: true
+  decode_url_encoding: true
+  parse_body: [json, form, multipart]
+
+rest_method_class:
+  GET: F
+  HEAD: F
+  OPTIONS: F
+  DELETE: A
+  PUT: B
+  PATCH: B
+  POST: unknown
+  TRACE: deny
+
+# ---------------------------------------------------------------------
+# A. 删除 / 清空 / 销毁 —— 对被审计源码是红线（只读副本）
+# ---------------------------------------------------------------------
+A:
+  file_destroy:
+    - truncate
+    - shred
+    - wipe
+    - zero
+    - erase
+    - unlink
+    - rmdir
+    - purge
+    - rm
+  batch_or_table:
+    - deleteall
+    - removeall
+    - cleanup
+    - drop
+  invalidate_terminate:
+    - kill
+    - invalidate
+  zh:
+    - 删除
+    - 清空
+    - 销毁
+  pinyin:
+    - shanchu
+    - qingkong
+
+# ---------------------------------------------------------------------
+# B. 覆盖 / 改写 —— 打补丁必须写到产物目录，不能原地改源码
+# ---------------------------------------------------------------------
+B:
+  field_overwrite:
+    - overwrite
+    - patch
+    - replace
+    - rewrite
+    - reformat
+    - format
+  reset_rollback:
+    - reset
+    - restore
+    - rollback
+    - revert
+    - checkout
+  migrate_ownership:
+    - move
+    - transfer
+    - import
+    - sync
+  zh:
+    - 覆盖
+    - 重置
+    - 回滚
+  pinyin:
+    - fugai
+    - chongzhi
+
+# ---------------------------------------------------------------------
+# C. 受限修改：注释/改名/加标记属于审计过程，允许但需留痕
+# ---------------------------------------------------------------------
+C:
+  metadata_note:
+    - rename
+    - annotate
+    - comment
+    - tag
+    - label
+    - note
+    - bookmark
+    - suppress
+  zh:
+    - 重命名
+    - 注释
+    - 标记
+
+# ---------------------------------------------------------------------
+# D. 状态迁移：代码外发/发布，需显式授权（本域最容易出事的一类）
+# ---------------------------------------------------------------------
+D:
+  publish_code:
+    - push
+    - publish
+    - upload
+    - submit
+    - send
+    - share
+    - post
+    - gist
+    - paste
+  zh:
+    - 推送
+    - 发布
+    - 上传
+    - 提交
+    - 外发
+  pinyin:
+    - tuisong
+    - fabu
+    - shangchuan
+
+# ---------------------------------------------------------------------
+# E. 新建：报告/补丁/PoC 文件，只允许落在产物目录
+# ---------------------------------------------------------------------
+E:
+  create_artifact:
+    - create
+    - new
+    - init
+    - start
+    - generate
+    - scaffold
+    - write
+  zh:
+    - 新建
+    - 创建
+    - 生成
+
+# ---------------------------------------------------------------------
+# F. 读取/分析：静态分析、规则扫描、代码检索、调用图
+# ---------------------------------------------------------------------
+F:
+  query:
+    - get
+    - search
+    - query
+    - lookup
+    - list
+    - read
+    - view
+    - show
+    - grep
+    - find
+  analysis:
+    - scan
+    - audit
+    - analyze
+    - parse
+    - ast
+    - sast
+    - semgrep
+    - joern
+    - taint
+    - callgraph
+    - dataflow
+    - diff
+    - blame
+    - history
+  zh:
+    - 查询
+    - 检索
+    - 扫描
+    - 审计
+    - 污点
+    - 调用图
+
+# ---------------------------------------------------------------------
+# 参数开关 / 方法伪装（复用在线域规则：换皮不改变动作后果）
+# ---------------------------------------------------------------------
+param_switches:
+  method_override: [_method, _method_override, x-http-method-override]
+  action_keys: [action, op, do, cmd, operate, method, type, mode, flag]
+  destructive_values: [delete, del, rm, remove, purge, clear, wipe, truncate, drop, reset]
+  overwrite_values: [overwrite, replace, reset, force, is_cover, cover, merge, sync, assign, apply]
+  batch_patterns:
+    - "*all"
+    - "batch*"
+    - "*byids"
+
+# ---------------------------------------------------------------------
+# 命令执行允许集（审计场景只需要"我是谁/在哪"）
+# ---------------------------------------------------------------------
+rce_exec_allowlist:
+  - whoami
+  - id
+  - uname
+  - hostname
+  - pwd
+rce_exec_denylist:
+  - cat
+  - less
+  - more
+  - head
+  - tail
+  - env
+  - printenv
+  - curl
+  - wget
+  - nc
+  - ncat
+  - socat
+  - ssh
+  - scp
+  - rsync
+  - base64
+  - chmod
+  - chown
+  - crontab
+  - systemctl

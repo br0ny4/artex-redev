@@ -1,6 +1,6 @@
 # 07 · 域包（domain pack）：同一套执行层，不同域策略
 
-> 状态：web-pentest ✅ / binary-re ✅（离线域首个包）/ malware-triage、source_audit 📋
+> 状态：web-pentest ✅ / binary-re ✅ / source-audit ✅ / malware-triage 📋
 > 代码：`policy/embed.go`、`policy/{web-pentest,binary-re}/`、`policy/packs_test.go`
 
 ## 1. 为什么要域包
@@ -22,6 +22,16 @@
 | 出网 | 报告通道 + dnslog/collaborator | 情报回源白名单（VT/MB/OTX），其余全禁 |
 | 关键红线 | R1 破坏性、R8 外传、R10 凭据复用 | R8 产物出网、R12 未授权上传、R13 宿主机执行 |
 | 预算重点 | 请求数/速率/样本数/PII 条数 | 情报查询次数（默认 200/任务，1 rps） |
+
+第三个包 `source-audit` 面向源码审计与 0day 挖掘（semgrep / Joern / ast-grep / tree-sitter）：
+
+| | 源码审计（source-audit） |
+|---|---|
+| 目标 | 本地源码目录清单（`scope.local_paths`），没有网络目标 |
+| 越界 | 源码/片段/凭据出网；git push / 上传代码到远端 |
+| 出网 | 默认**零出网**，只有部署上下文声明的报告通道 |
+| 红线 | R8 源码外发、R14 原地改被审计源码、R15 发布代码到远端 |
+| 工具 | 审计工具默认可用；`ssh`/`scp`/`rsync`/`nc`/`curl`/`wget` 默认禁用 |
 
 把这些差异写进同一份 yaml 会得到互相矛盾的默认值（例如"测试账号 2 个"对病毒分析毫无意义），
 所以按域分包，各自一份 `policy.yaml` + `verb-lexicon.yaml`。
@@ -62,6 +72,16 @@ engagement:
   L2 出网收口（`deploy/egress-lockdown/`）+ guard 审批来兜。
 - "经脚本/编码把产物外传"同理：出网白名单能挡住目的地，但挡不住先压缩再走允许域名的
   通道（这属于通道判定，规划在 P2.5 的触发验证切片里一并做）。
+
+## 3.5 source-audit 包额外说明
+
+- 授权范围从"域名清单"换成"目录清单"：`scope.local_paths`（`policy/config.go:EngScope.LocalPaths`）。
+  离线域没有网络目标，用 `scope.allow` 硬填域名只会让人误以为在测网络服务。
+- 被审计源码是证据：修补丁必须写进 `artifacts.dir`，原地改源码命中 A/B 类红线。
+- 报告通道之外的出网一律拒绝；`semgrep --config r/...` 这类需要联网拉规则的用法要先
+  在上下文里显式加白名单，否则判定会挡住（这是有意的）。
+- 同样诚实说明：已有谓词覆盖"已知外传工具 + 已知目的地"，但"把代码片段贴进允许域名"这类
+  通道判定尚无谓词，靠出网白名单 + L2 出网收口兜底。
 
 ## 4. 新增一个域包
 
