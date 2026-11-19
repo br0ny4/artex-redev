@@ -27,6 +27,7 @@ import (
 	"github.com/br0ny4/artex-redev/intercept"
 	"github.com/br0ny4/artex-redev/llmpool"
 	"github.com/br0ny4/artex-redev/llmrec"
+	"github.com/br0ny4/artex-redev/policy"
 	"github.com/br0ny4/artex-redev/report"
 	"github.com/br0ny4/artex-redev/traffic"
 )
@@ -121,6 +122,11 @@ type Server struct {
 	archiveWake chan struct{}
 	archiveWG   sync.WaitGroup
 	side        *sideQuestionState
+
+	// policyHoldPaused 记录"因规范全量停止被平台暂停"的任务，操作员答复恢复时只续跑
+	// 这批，不动操作员自己暂停的任务。key = 引擎挂起 id。
+	policyHoldMu     sync.Mutex
+	policyHoldPaused map[int64][]string
 }
 
 // provEntry is a cached provider + its config for one LLM profile id.
@@ -152,12 +158,15 @@ func New(ctx context.Context, m *Manager, skillDir string, dataDir string, keyDi
 		triggerActive: map[string]int{}, triggerCfg: map[string]triggerBehavior{},
 		profChatAgents: map[int64]*agent.ChatAgent{},
 		provByProfile:  map[int64]*provEntry{}, llmHealth: newLLMHealthRegistry(m.pg),
-		taskAgents: map[string]*taskAgentBundle{}, archiveWake: make(chan struct{}, 1)}
+		taskAgents: map[string]*taskAgentBundle{}, archiveWake: make(chan struct{}, 1),
+		policyHoldPaused: map[int64][]string{}}
 	// 初始化口令只在启动日志里出现：能看日志 = 有资格初始化（P0 硬化）。
 	log.Printf("[auth] 初始化口令（首次 /setup 需要；可用 ARTEX_SETUP_TOKEN 覆盖）：%s", s.setupToken)
 	s.initSideQuestions()
 	// 规范判定审计：异步写 PG（hash chain），不阻塞判定路径。
 	installPolicyAuditor(ctx, m.pg)
+	// 全量停止时暂停任务、答复恢复后续跑：挂起可能等几小时，不暂停就是空烧 token。
+	policy.SetHoldObserver(s.pauseTasksForPolicyHold, s.resumeTasksAfterPolicyHold)
 	// 熔断阈值/冷却是失败路径上的热参数，启动时把全局重试策略推给 Registry 一次；
 	// 之后每次保存策略再推一次（saveLLMRetryPolicy）。
 	s.applyRetryPolicy()

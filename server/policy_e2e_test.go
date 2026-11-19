@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/br0ny4/artex-redev/agent"
 	"github.com/br0ny4/artex-redev/policy"
 )
 
@@ -226,5 +227,69 @@ func TestPolicyHoldLifecycle(t *testing.T) {
 	}
 	if _, active := eng.ActiveHold(); active {
 		t.Fatal("恢复后挂起应解除")
+	}
+}
+
+// TestPolicyHoldPausesAndResumesTasks 覆盖"全量停止 = 真的停下来"这一闭环：
+// 挂起必须暂停正在跑的任务（否则等待答复期间 Agent 会不停换路径重试、空烧 token），
+// 操作员答复恢复后续跑，且不能把操作员自己暂停的任务也顺手恢复。
+func TestPolicyHoldPausesAndResumesTasks(t *testing.T) {
+	m, err := NewManager(t.TempDir(), "")
+	if err != nil {
+		t.Skipf("database unavailable (%v) — skipping", err)
+	}
+	defer m.Close()
+	if m.pg == nil {
+		t.Skip("postgres unavailable — skipping")
+	}
+	td := t.TempDir()
+	s := New(context.Background(), m, td, td, td)
+	eng := installTestPolicy(t)
+
+	task, err := m.CreateTask("policy hold pause", "hold pause goal", nil, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _, _ = m.DeleteTask(task.ID, DeleteTaskOptions{}) }()
+	// 另一个任务由"操作员自己"暂停：挂起/恢复都不该碰它。
+	userTask, err := m.CreateTask("user paused", "user paused goal", nil, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _, _ = m.DeleteTask(userTask.ID, DeleteTaskOptions{}) }()
+	if _, err := s.applyTaskControlWithCause(userTask, "pause", agent.AbortPausedByUser); err != nil {
+		t.Fatalf("模拟操作员暂停任务失败: %v", err)
+	}
+
+	hold, created := eng.RaiseHold("SCOPE_UNCERTAIN", "范围归属不明", "example.com 是否在授权范围内？")
+	if !created {
+		t.Fatal("首次挂起应成功")
+	}
+
+	waitFor := func(name string, want bool, get func() bool) {
+		t.Helper()
+		deadline := time.Now().Add(10 * time.Second)
+		for time.Now().Before(deadline) {
+			if get() == want {
+				return
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
+		t.Fatalf("%s: 10s 内未达到期望状态 %v", name, want)
+	}
+	waitFor("挂起后任务应被暂停", true, func() bool { return task.Paused })
+	if !s.engine.IsPaused(task.ID) {
+		t.Fatal("挂起暂停应同时停下引擎侧执行")
+	}
+
+	if !eng.ReleaseGlobalHold(hold.ID) {
+		t.Fatal("答复后应能解除挂起")
+	}
+	waitFor("答复恢复后任务应续跑", false, func() bool { return task.Paused })
+	waitFor("任务续跑后引擎应解除暂停", false, func() bool { return s.engine.IsPaused(task.ID) })
+
+	// 操作员自己暂停的任务必须保持暂停：平台不能替操作员做这个决定。
+	if !userTask.Paused {
+		t.Fatal("操作员手动暂停的任务被自动恢复了")
 	}
 }

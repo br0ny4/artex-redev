@@ -131,13 +131,15 @@
 | 挂起落库与操作员答复 API | ✅ | `db/policy_holds.go`、`server/policy_hold_api.go`（`/api/policy/holds`） |
 | `/api/auth/init` 一次性 setup token（启动日志/环境变量） | ✅ | `server/auth.go`、setup 页 |
 | 前端操作台 `/system/policy`：挂起横幅 + 答复（记录/恢复两种）+ 判定流水 + 审计链校验 | ✅ | 顾问/蓝队可直接作业 |
+| 挂起联动任务调度：全量停止即暂停在跑任务，答复恢复后续跑（只续跑因挂起暂停的） | ✅ | `server/policy_hold_pause.go` + e2e 测试 |
 | **未做**：合规矩阵端到端用例（当前各层单测已覆盖） | ⬜ | 下一个切片 |
 
 ---
 
 # 下一步（自主执行顺序）
 
-1. **挂起时暂停任务**：当前挂起会挡住所有请求/命令（Stop-All 语义已达成），但不会主动暂停正在跑的 agent 轮次；下一步在挂起时调用 engine.Pause，省掉空转 token。
+1. **离线域包**：`binary_re` / `malware_triage` / `source_audit` 三个域包（MCP 可插拔接入 radare2-mcp、Ghidra headless、semgrep），复用同一套判定与审计。
+2. **策略状态进仪表盘**：把挂起数、拦截数、预算余量做成首页指标，蓝队值班时一眼能看出平台在拦什么。
 2. **策略状态进仪表盘**：把"执行层是否启用/是否挂起"提到仪表盘首屏，避免带着未生效策略去测。
 4. **合规矩阵端到端**：把 04 §8 的用例扩成端到端（起代理 → 发请求 → 断言 403/截断/挂起）。
 5. **L2 之外**：非 compose 部署的 netns 脚本化（`deploy/egress-lockdown/README.md` 已给模板）。

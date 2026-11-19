@@ -2,7 +2,9 @@ package policy
 
 import (
 	"context"
+	"sync"
 	"testing"
+	"time"
 )
 
 // 规范 7.3：需要确认时**全量停止**，未获明确答复前不恢复。
@@ -104,5 +106,82 @@ func TestBudgetExhaustionRaisesHold(t *testing.T) {
 	}
 	if h, ok := e.ActiveHold(); !ok || h.Rule != "BUDGET_EXHAUSTED" {
 		t.Fatalf("应存在预算挂起: %+v ok=%v", h, ok)
+	}
+}
+
+// TestHoldObserverFiresOnceAndOnResume 守住 server 侧"挂起即暂停任务"所依赖的钩子：
+// 只在新挂起时通知一次（agent 重试不重复），恢复时通知一次。
+func TestHoldObserverFiresOnceAndOnResume(t *testing.T) {
+	var mu sync.Mutex
+	var heldInfo HoldInfo
+	var resumedInfo HoldInfo
+	held, resumed := 0, 0
+	SetHoldObserver(func(h HoldInfo) {
+		mu.Lock()
+		held++
+		heldInfo = h
+		mu.Unlock()
+	}, func(h HoldInfo) {
+		mu.Lock()
+		resumed++
+		resumedInfo = h
+		mu.Unlock()
+	})
+	defer SetHoldObserver(nil, nil)
+
+	eng := newTestEngine(t, testEngagement(t))
+	h, created := eng.RaiseHold("SCOPE_UNCERTAIN", "范围不明", "是否在范围内？")
+	if !created {
+		t.Fatal("首次挂起应成功")
+	}
+	if _, created := eng.RaiseHold("SEMANTICS_UNCERTAIN", "语义不明", "?"); created {
+		t.Fatal("已挂起时再挂起应幂等返回")
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		mu.Lock()
+		gotHeld := held
+		mu.Unlock()
+		if gotHeld >= 1 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("挂起没有通知观察者：任务不会被暂停，等待答复的几小时里会持续空烧 token")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	// 给重复通知留出插队时间，确认只发一次。
+	time.Sleep(100 * time.Millisecond)
+	mu.Lock()
+	if held != 1 || resumed != 0 {
+		mu.Unlock()
+		t.Fatalf("观察者调用次数 held=%d resumed=%d，期望 1/0", held, resumed)
+	}
+	if heldInfo.ID != h.ID {
+		mu.Unlock()
+		t.Fatalf("挂起通知 id=%d want %d", heldInfo.ID, h.ID)
+	}
+	mu.Unlock()
+
+	if !eng.ReleaseGlobalHold(h.ID) {
+		t.Fatal("恢复应成功")
+	}
+	deadline = time.Now().Add(3 * time.Second)
+	for {
+		mu.Lock()
+		got := resumed
+		mu.Unlock()
+		if got >= 1 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("恢复没有通知观察者：任务不会被续跑")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if resumedInfo.ID != h.ID {
+		t.Fatalf("恢复通知 id=%d want %d", resumedInfo.ID, h.ID)
 	}
 }
