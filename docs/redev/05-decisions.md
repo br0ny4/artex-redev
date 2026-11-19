@@ -139,7 +139,8 @@
 | malware-triage 分诊域包：一律不执行样本（R13 `execute_sample_at_all`）、分诊工具白名单、更紧预算 | ✅ | `policy/malware-triage/` + 测试（[07](07-domain-packs.md)） |
 | 域包级部署上下文必填项（`engagement_requirements`，离线域不要求测试账号） | ✅ | `policy/config.go` |
 | 策略状态进仪表盘：顶部停止横幅、规范执行（pack/状态）、近 100 条判定拦截数 | ✅ | `web/src/app/(main)/dashboard/page.tsx` |
-| **未做**：合规矩阵端到端用例（当前各层单测已覆盖） | ⬜ | 下一个切片 |
+| L3 出口端到端：真实代理拦截（403 + X-ArtEx-Policy + 落索引，未发包） | ✅ | `traffic/policy_e2e_test.go` |
+| **未做**：合规矩阵其余端到端（响应截断/预算/挂起全链路） | ⬜ | 下一个切片 |
 
 ---
 
