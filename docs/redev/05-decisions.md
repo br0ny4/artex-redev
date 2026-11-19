@@ -150,5 +150,5 @@
 2. **预算余量进仪表盘**：挂起数/拦截数/当前域包已上首页；预算余量与域包级指标（情报查询余量）仍缺。
 3. **合规矩阵端到端**：把 04 §8 的用例扩成端到端（起代理 → 发请求 → 断言 403/截断/挂起）。
 4. **L2 之外**：非 compose 部署的 netns 脚本化（`deploy/egress-lockdown/README.md` 已给模板）。
-5. **发布**：v0.2.0 镜像已实测可拉取（`docker pull` 通过，amd64/arm64 multi-arch，二进制可启动）；
-   把域包与仪表盘切片作为 v0.3.0 发布，release notes 取 CHANGELOG。
+5. **发布**：v0.2.0 / v0.3.0 均已完成（tag → release run → 5 平台 zip + SHA256SUMS + GHCR 多架构镜像，
+   v0.2.0 实测 `docker pull` 通过且二进制可启动）；下一个版本带 malware-triage 与 L3 端到端用例。

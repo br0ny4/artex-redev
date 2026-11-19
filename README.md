@@ -100,8 +100,8 @@ cp .env.example .env                 # 填 POSTGRES_PASSWORD
 docker compose up -d                 # 镜像来自 ghcr.io/br0ny4/artex-redev
 ```
 
-镜像按 tag 发布（`ghcr.io/br0ny4/artex-redev:v0.2.0`，`latest` 指向最新版本）；
-v0.2.0 已实测可拉取（linux/amd64 + linux/arm64 多架构 manifest）。
+镜像按 tag 发布（`ghcr.io/br0ny4/artex-redev:v0.3.0`，`latest` 指向最新版本）；
+v0.2.0 / v0.3.0 均已实测可拉取（linux/amd64 + linux/arm64 多架构 manifest）。
 需要自己改工具链时用源码构建：
 
 ```bash
