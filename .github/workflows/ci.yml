@@ -57,8 +57,10 @@ jobs:
             exit 1
           fi
 
+      # -p 1：所有包共用同一个 PostgreSQL，并行跑包会互相踩数据（已观察到
+      # agent 的死锁/作用域缺失、llmrec 的建表竞争）。串行是单库 CI 的正确答案。
       - name: 单元测试（含 PostgreSQL 集成）
-        run: go test ./... -count=1 -timeout 10m
+        run: go test ./... -count=1 -p 1 -timeout 15m
 
       - name: 策略层回归（规范执行层）
         run: go test ./policy/ ./guard/ ./traffic/ -count=1 -v 2>&1 | tail -40

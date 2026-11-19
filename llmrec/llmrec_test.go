@@ -6,9 +6,9 @@ import (
 	"os"
 	"testing"
 
-	"github.com/br0ny4/artex-redev/db"
 	"github.com/Autumn-27/norma/llm"
 	"github.com/Autumn-27/norma/transcript"
+	"github.com/br0ny4/artex-redev/db"
 	"github.com/google/uuid"
 )
 
@@ -92,6 +92,11 @@ func TestSideUsageRecordedOnceOnConsumerCancellation(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer pg.Close()
+	// llm_usage 由 manager 启动时按需创建，不在 schema.sql 里；这个用例必须自己建表，
+	// 否则在干净数据库（CI）上会因 relation 不存在而失败。
+	if err := pg.EnsureLLMUsageTable(); err != nil {
+		t.Fatal(err)
+	}
 	for _, early := range []bool{false, true} {
 		profile := "btw-metering-" + uuid.NewString()
 		ctx, cancel := context.WithCancel(transcript.WithSessionID(t.Context(), "exp0-btw-test"))
