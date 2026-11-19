@@ -14,8 +14,9 @@
 package policy
 
 import (
-	_ "embed"
+	"embed"
 	"fmt"
+	"strings"
 	"sync/atomic"
 
 	"gopkg.in/yaml.v3"
@@ -24,11 +25,10 @@ import (
 // 嵌入式资产：策略配置、词表、敏感特征、规范正文。
 // 规范正文只随提示词注入，不参与判定；放在这里是为了「提示词与判定同源同版本」。
 var (
-	//go:embed web-pentest/policy.yaml
-	rawPolicyYAML []byte
-
-	//go:embed web-pentest/verb-lexicon.yaml
-	rawLexiconYAML []byte
+	// 域包各自一份策略配置与语义词表。目录名即域包名（web-pentest / binary-re ...）。
+	// 用 embed.FS 而不是逐文件 embed：新增域包只加目录，不改 embed 指令的形状。
+	//go:embed web-pentest binary-re
+	packsFS embed.FS
 
 	//go:embed patterns/secret.txt
 	rawSecretPatterns []byte
@@ -37,23 +37,66 @@ var (
 	rawSpecMarkdown []byte
 )
 
-// DefaultConfig 解析内置 policy.yaml。返回值每次都是新副本，调用方可安全修改。
-func DefaultConfig() (*Config, error) {
-	var cfg Config
-	if err := yaml.Unmarshal(rawPolicyYAML, &cfg); err != nil {
-		return nil, fmt.Errorf("解析内置 policy.yaml: %w", err)
+// DefaultPack 是未指定域包时使用的包名。
+const DefaultPack = "web-pentest"
+
+// AvailablePacks 返回随二进制发布的域包名，供 /api/policy/status 与安装日志提示。
+func AvailablePacks() []string {
+	entries, err := packsFS.ReadDir(".")
+	if err != nil {
+		return nil
 	}
+	out := make([]string, 0, len(entries))
+	for _, en := range entries {
+		if en.IsDir() {
+			out = append(out, en.Name())
+		}
+	}
+	return out
+}
+
+// PackConfig 解析指定域包的 policy.yaml。pack 为空用 DefaultPack。
+// 未知包名返回错误而不是静默回退：静默回退会让人以为在用 A 域策略，实际在跑 B 域。
+func PackConfig(pack string) (*Config, error) {
+	pack = strings.TrimSpace(pack)
+	if pack == "" {
+		pack = DefaultPack
+	}
+	raw, err := packsFS.ReadFile(pack + "/policy.yaml")
+	if err != nil {
+		return nil, fmt.Errorf("未知域包 %q（可用：%s）: %w", pack, strings.Join(AvailablePacks(), ", "), err)
+	}
+	var cfg Config
+	if err := yaml.Unmarshal(raw, &cfg); err != nil {
+		return nil, fmt.Errorf("解析 %s/policy.yaml: %w", pack, err)
+	}
+	// 记住来源包，供 status/审计标注（yaml 里没有这个键，不参与解码）。
+	cfg.Pack = pack
 	return &cfg, nil
 }
 
-// DefaultLexicon 解析内置词表。
-func DefaultLexicon() (*Lexicon, error) {
+// PackLexicon 解析指定域包的 verb-lexicon.yaml。
+func PackLexicon(pack string) (*Lexicon, error) {
+	pack = strings.TrimSpace(pack)
+	if pack == "" {
+		pack = DefaultPack
+	}
+	raw, err := packsFS.ReadFile(pack + "/verb-lexicon.yaml")
+	if err != nil {
+		return nil, fmt.Errorf("未知域包 %q: %w", pack, err)
+	}
 	var lx Lexicon
-	if err := yaml.Unmarshal(rawLexiconYAML, &lx); err != nil {
-		return nil, fmt.Errorf("解析内置 verb-lexicon.yaml: %w", err)
+	if err := yaml.Unmarshal(raw, &lx); err != nil {
+		return nil, fmt.Errorf("解析 %s/verb-lexicon.yaml: %w", pack, err)
 	}
 	return &lx, nil
 }
+
+// DefaultConfig 解析默认域包的 policy.yaml。返回值每次都是新副本，调用方可安全修改。
+func DefaultConfig() (*Config, error) { return PackConfig(DefaultPack) }
+
+// DefaultLexicon 解析默认域包的词表。
+func DefaultLexicon() (*Lexicon, error) { return PackLexicon(DefaultPack) }
 
 // SpecMarkdown 返回规范正文（UTF-8），供 system prompt 注入使用。
 func SpecMarkdown() string { return string(rawSpecMarkdown) }

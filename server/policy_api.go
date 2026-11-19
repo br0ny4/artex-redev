@@ -94,6 +94,7 @@ func (s *Server) pgPolicyStatus(w http.ResponseWriter, r *http.Request) {
 		"enforcing":    eng.Enforcing(),
 		"spec_version": eng.SpecVersion(),
 		"handshake":    eng.HandshakeToken(),
+		"pack":         eng.Pack(),
 	}
 	if e := eng.Engagement(); e != nil {
 		resp["engagement"] = map[string]any{
@@ -104,6 +105,7 @@ func (s *Server) pgPolicyStatus(w http.ResponseWriter, r *http.Request) {
 			"scope":     e.Scope,
 			"artifacts": e.Artifacts,
 			"spec":      e.Compliance.SpecVersion,
+			"pack":      e.Pack,
 		}
 	}
 	writeJSON(w, 200, resp)

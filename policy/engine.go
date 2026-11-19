@@ -59,9 +59,11 @@ func New(cfg *Config, lex *Lexicon, eng *Engagement, resolver Resolver) (*Engine
 			return nil, err
 		}
 	}
-	if lex == nil {
+	// 词表索引（classOf/highRisk/...）只在 NewLexicon 里建；外部传入的解码结果
+	// 不建索引就会把每条请求都判成 unknown。所以无论传不传，都走一遍 NewLexicon。
+	{
 		var err error
-		if lex, err = NewLexicon(nil); err != nil {
+		if lex, err = NewLexicon(lex); err != nil {
 			return nil, err
 		}
 	}
@@ -110,6 +112,14 @@ func (e *Engine) Engagement() *Engagement { return e.eng }
 
 // SpecVersion 返回平台锁定执行的规范版本（policy.yaml:spec.version）。
 func (e *Engine) SpecVersion() string { return e.cfg.Spec.Version }
+
+// Pack 返回本引擎使用的域包名（web-pentest / binary-re ...），用于状态展示与审计标注。
+func (e *Engine) Pack() string {
+	if e.cfg == nil {
+		return ""
+	}
+	return e.cfg.Pack
+}
 
 // HandshakeToken 返回规范要求的握手串。
 func (e *Engine) HandshakeToken() string { return e.cfg.Spec.Handshake }

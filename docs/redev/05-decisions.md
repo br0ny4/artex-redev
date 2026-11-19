@@ -133,14 +133,17 @@
 | 前端操作台 `/system/policy`：挂起横幅 + 答复（记录/恢复两种）+ 判定流水 + 审计链校验 | ✅ | 顾问/蓝队可直接作业 |
 | MCP 工具模板（9 个：radare2 / IDA×2 / Ghidra / ReVa / Playwright / CDP / Semgrep / VirusTotal） | ✅ | `server/mcp_presets.go` + `/api/mcp/presets` + MCP 页模板区 |
 | 挂起联动任务调度：全量停止即暂停在跑任务，答复恢复后续跑（只续跑因挂起暂停的） | ✅ | `server/policy_hold_pause.go` + e2e 测试 |
+| 域包抽象：`engagement.pack` 选包、未知包报错、`ARTEX_POLICY_PACK` 覆盖、状态展示 pack | ✅ | `policy/embed.go`、`policy/packs_test.go` |
+| binary-re 离线域包：情报回源白名单、禁宿主模拟器、送检审授权、R12/R13 红线 | ✅ | `policy/binary-re/` + 测试（[07](07-domain-packs.md)） |
+| 域包级部署上下文必填项（`engagement_requirements`，离线域不要求测试账号） | ✅ | `policy/config.go` |
 | **未做**：合规矩阵端到端用例（当前各层单测已覆盖） | ⬜ | 下一个切片 |
 
 ---
 
 # 下一步（自主执行顺序）
 
-1. **离线域包**：`binary_re` / `malware_triage` / `source_audit` 三个域包（MCP 可插拔接入 radare2-mcp、Ghidra headless、semgrep），复用同一套判定与审计。
-2. **策略状态进仪表盘**：把挂起数、拦截数、预算余量做成首页指标，蓝队值班时一眼能看出平台在拦什么。
-2. **策略状态进仪表盘**：把"执行层是否启用/是否挂起"提到仪表盘首屏，避免带着未生效策略去测。
-4. **合规矩阵端到端**：把 04 §8 的用例扩成端到端（起代理 → 发请求 → 断言 403/截断/挂起）。
-5. **L2 之外**：非 compose 部署的 netns 脚本化（`deploy/egress-lockdown/README.md` 已给模板）。
+1. **其余离线域包**：`malware_triage`（capa/YARA/FLOSS）、`source_audit`（Semgrep CE/Joern）——`binary_re` 已跑通，按 07 文档"新增包五步"复制。
+2. **策略状态进仪表盘**：把挂起数、拦截数、预算余量、当前域包做成首页指标，蓝队值班时一眼看出平台在拦什么、用哪套策略（避免带着未生效策略去测）。
+3. **合规矩阵端到端**：把 04 §8 的用例扩成端到端（起代理 → 发请求 → 断言 403/截断/挂起）。
+4. **L2 之外**：非 compose 部署的 netns 脚本化（`deploy/egress-lockdown/README.md` 已给模板）。
+5. **发布**：v0.2.0 镜像（GHCR 多架构）拉取验证通过后，把本切片作为 v0.3.0 发布；release notes 直接取 CHANGELOG。

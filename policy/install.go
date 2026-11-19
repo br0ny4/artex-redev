@@ -129,11 +129,22 @@ func InstallFromFile(path string) (*Engine, error) {
 	if err != nil {
 		return nil, err
 	}
-	cfg, err := DefaultConfig()
+	// 域包选择：部署上下文里的 engagement.pack 优先，ARTEX_POLICY_PACK 可覆盖
+	// （同一份上下文在评测环境里换包跑时用）。不认识的包名直接报错，不回退默认，
+	// 否则会用 A 域策略跑 B 域作业，而且没人会发现。
+	pack := strings.TrimSpace(eng.Pack)
+	if v := strings.TrimSpace(os.Getenv("ARTEX_POLICY_PACK")); v != "" {
+		pack = v
+	}
+	cfg, err := PackConfig(pack)
 	if err != nil {
 		return nil, err
 	}
-	e, err := New(cfg, nil, eng, NewNetResolver(5*time.Minute))
+	lx, err := PackLexicon(pack)
+	if err != nil {
+		return nil, err
+	}
+	e, err := New(cfg, lx, eng, NewNetResolver(5*time.Minute))
 	if err != nil {
 		return nil, err
 	}

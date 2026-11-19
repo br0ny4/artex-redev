@@ -26,6 +26,20 @@ type Config struct {
 	Stop        StopConfig        `yaml:"stop"`
 	Report      ReportConfig      `yaml:"report"`
 	Compliance  ComplianceConfig  `yaml:"compliance"`
+
+	// Requirements 声明该域包对部署上下文的必填项。在线测试域要求测试账号兜住
+	// C/D/E 类操作；离线分析域不碰目标账号体系，强填只会逼使用者造假账号。
+	Requirements EngagementRequirements `yaml:"engagement_requirements"`
+
+	// Pack 是策略来源的域包名（web-pentest / binary-re ...），由 PackConfig 填入，
+	// 不参与 yaml 解码；用于状态展示与审计标注"这批判定用的是哪套域策略"。
+	Pack string `yaml:"-"`
+}
+
+// EngagementRequirements 是"部署上下文填什么才算完整"的域包声明。
+// 未写字段按在线域（最严）处理：漏声明不该把校验放松。
+type EngagementRequirements struct {
+	TestAccounts bool `yaml:"test_accounts"`
 }
 
 type Spec struct {
@@ -171,6 +185,10 @@ type Engagement struct {
 	Artifacts  Artifacts      `yaml:"artifacts" json:"artifacts"`
 	Overrides  map[string]any `yaml:"budget_overrides" json:"budget_overrides"`
 	Compliance EngCompliance  `yaml:"compliance" json:"compliance"`
+
+	// Pack 显式声明本次作业使用的域包；为空时用默认包（web-pentest）。
+	// 离线域（binary-re）与在线域的红线不同，混用会让判定语义错位，所以必须能标出来。
+	Pack string `yaml:"pack" json:"pack,omitempty"`
 }
 
 type Window struct {
@@ -292,7 +310,12 @@ func LoadEngagement(raw []byte) (*Engagement, error) {
 			return nil, fmt.Errorf("解析部署上下文: %w", err)
 		}
 	}
-	if err := e.Validate(); err != nil {
+	// 按部署上下文声明的域包取必填项；未知包名在这里就报错（而不是启动后静默用默认包）。
+	packCfg, err := PackConfig(e.Pack)
+	if err != nil {
+		return nil, err
+	}
+	if err := e.validate(packCfg.Requirements); err != nil {
 		return nil, err
 	}
 	return &e, nil
@@ -301,6 +324,11 @@ func LoadEngagement(raw []byte) (*Engagement, error) {
 // Validate 检查规范 9.2 的必填项。缺项返回 ErrContextIncomplete（不是致命错误：
 // 任务降级为被动分析）。
 func (e *Engagement) Validate() error {
+	return e.validate(EngagementRequirements{TestAccounts: true})
+}
+
+// validate 按域包声明的必填项校验。
+func (e *Engagement) validate(req EngagementRequirements) error {
 	var missing []string
 	if strings.TrimSpace(e.Client) == "" {
 		missing = append(missing, "engagement.client")
@@ -317,7 +345,7 @@ func (e *Engagement) Validate() error {
 	if len(e.Scope.Domains)+len(e.Scope.IPs)+len(e.Scope.CIDRs)+len(e.Scope.Apps)+len(e.Scope.APIs) == 0 {
 		missing = append(missing, "scope（至少一项 domain/ip/cidr/app/api）")
 	}
-	if len(e.Accounts) == 0 {
+	if len(e.Accounts) == 0 && req.TestAccounts {
 		missing = append(missing, "test_accounts（C/D/E 类操作需要）")
 	}
 	if strings.TrimSpace(e.Report.Channel) == "" {

@@ -1,0 +1,215 @@
+# =====================================================================
+# 离线二进制分析域策略包（binary_re）— 机器可读执行配置
+#
+# 依据：本仓库 docs/redev/07-domain-packs.md；执行层契约（fail-closed、全量停止、
+#      判定审计、预算熔断）与在线域相同，差异只在"什么是目标、什么算越界"：
+#
+#   - 在线域的目标是 HTTP 资产，越界 = 打到范围外的域名/IP；
+#   - 离线域的目标是**本地产物**（样本、固件、软件包），越界 = 把产物送出去
+#     （上传到第三方服务）、或把样本放到宿主机上执行、或推断出的情报范围外扩。
+#
+# 因此本包把出网收得比在线域更死：除了情报回源白名单，一律不出网。分析工具
+# （radare2 / Ghidra / objdump / strings / capa / YARA / FLOSS）本身不需要出网，
+# 需要联网的只有查哈希/样本情报这一步，而那一步必须显式列入部署上下文。
+#
+# 诚实说明（勿当保证）：平台当前对"样本在宿主机执行"没有硬判定谓词，靠
+# deployment-context 的 sandbox 声明 + L2 出网收口 + guard 审批来兜。未经沙箱
+# 的样本执行等于把客户环境当靶机，操作员必须在上下文里写明沙箱再开工。
+# =====================================================================
+
+spec:
+  id: offline-binary-analysis
+  version: "2.5"                     # 复用同一套执行层契约版本，避免两套 spec 漂移
+  handshake: "[RULES_LOADED v2.5]"
+  fail_mode: closed
+
+# 域包对部署上下文的必填项（在线域要求测试账号兜住 C/D/E 类操作）
+engagement_requirements:
+  test_accounts: false
+
+enforcement:
+  mode: hard
+  layers:
+    - artifact_fs                    # 产物目录收口：样本只读副本 + 输出目录
+    - tool_guard                     # PreToolUse：工具白名单、禁止宿主机执行样本
+    - egress_allowlist               # 只有情报回源域名可出网
+    - request_proxy                  # 仍然接管 HTTP：情报查询同样受范围与预算约束
+    - hold_controller                # 判不清 → 全量停止
+  on_violation:
+    action: deny
+    hold_task: true
+    notify: operator
+
+# ---------------------------------------------------------------------
+# 授权范围：离线域里"目标"是产物与情报源，不是域名清单
+# ---------------------------------------------------------------------
+scope:
+  require_deployment_context: true
+  deny_by_default: true              # 未在上下文里声明的情报源，一律不允许出网
+  allow: []                          # 由 deployment-context 注入（情报源域名）
+  exclude: []
+  ambiguous_as_out_of_scope: true    # 子域归属不明 → 不出网
+  third_party_detect:
+    cname_suffix:
+      - ".cloudfront.net"
+      - ".akamaiedge.net"
+      - ".aliyuncs.com"
+      - ".cloudflare.net"
+      - ".fastly.net"
+    asn_lookup: false                # 离线域不做出网 ASN 判定，白名单已足够
+    require_explicit: true
+  internal_cidrs_deny:               # 离线分析不需要访问任何内网地址
+    - 10.0.0.0/8
+    - 172.16.0.0/12
+    - 192.168.0.0/16
+    - 127.0.0.0/8
+    - 169.254.0.0/16
+    - "::1/128"
+    - "fc00::/7"
+  metadata_deny: ["169.254.169.254", "fd00::ec2::254"]
+  out_of_band_allow_suffixes: []      # 离线域默认不带外带通道；需要时显式加
+  egress_allowlist_extra:
+    - virustotal.com
+    - ".virustotal.com"
+    - "mb-api.abuse.ch"
+    - "bazaar.abuse.ch"
+    - "otx.alienvault.com"
+  budget_expansion:
+    reached_but_no_further_requests: true
+
+# ---------------------------------------------------------------------
+# 一票否决红线（离线域版本：样本与证据的安全边界）
+# ---------------------------------------------------------------------
+redlines:
+  - id: R1_destructive              # 对产物/环境的破坏性操作
+    deny_when: request_class_in [A, B]
+  - id: R2_bulk_export              # 批量外传样本/字符串/反编译结果
+    deny_when: response_rows_over_budget OR pagination_unbounded
+  - id: R3_dos
+    deny_when: rate_over_budget OR concurrency_over_budget
+  - id: R4_internal_lateral
+    deny_when: resolved_ip_in_internal_cidrs
+  - id: R8_exfil                    # 本域最重要的一条：产物出网
+    deny_when: egress_target_not_in [report_channel, intel_allowlist]
+  - id: R9_money
+    deny_when: benefit_or_payment_action
+  - id: R12_sample_upload           # 样本上第三方服务必须显式授权
+    deny_when: sample_upload_to_third_party_without_approval
+  - id: R13_host_execution          # 样本只能在声明过的沙箱里执行
+    deny_when: execute_sample_outside_declared_sandbox
+
+# ---------------------------------------------------------------------
+# 接口语义分级：离线域仍接 HTTP（情报查询），语义与在线域同构
+# ---------------------------------------------------------------------
+classes:
+  A_delete_clear_destroy:  deny
+  B_overwrite_reset_merge: deny
+  C_generic_modify:        restrict
+  D_state_transition:      restrict
+  E_create:                conditional
+  F_read:                  allow
+  unknown:                 deny
+semantics:
+  match_surface: [method, path, query_keys, query_values, body_keys, body_values, headers]
+  apply_order: [rest_method, explicit_verb, param_switch, batch_pattern, chinese_pinyin, llm_fallback]
+  obfuscation_is_violation: true
+  llm_fallback:
+    enabled: true
+    default_on_low_confidence: deny
+    log_decision: true
+
+# ---------------------------------------------------------------------
+# 预算：网络侧比在线域更紧（离线分析几乎不需要发包），产物侧见上下文声明
+# ---------------------------------------------------------------------
+budget:
+  sql_proof: identity_functions
+  vuln_samples: 1
+  internal_lateral_hosts: 0
+  send_actions: 0
+  pii_active_fetch: 0
+  response_body_max_mb: 50           # 样本报告可能较大；超限仍截断，原文不进上下文
+  test_accounts: 0
+  rate_rps_per_host: 1               # 情报 API 有配额，且离线作业不需要速率
+  concurrency_per_host: 1
+  retry_max: 1
+  total_requests_per_task: 200       # 兜底：查情报不该跑到 200 次以上
+  scanner_burst_max: 20
+  window: engagement_window
+  stop_at_expiry: true
+
+# ---------------------------------------------------------------------
+# 工具：分析工具必须可用；能"在宿主机跑样本"的模拟器默认禁用
+# ---------------------------------------------------------------------
+tools:
+  default_deny_binaries:
+    - wine
+    - wine64
+    - qemu-system-x86_64
+    - qemu-system-i386
+    - qemu-x86_64
+    - box64
+  approval: { scope: per_use, target_checked: true, read_only_only: true }
+  no_self_tuning: [rate, concurrency, timeout, retry]
+  no_probe_first: true
+  script_requires_counters: true
+  attribution: per_request
+
+# ---------------------------------------------------------------------
+# 响应检查：样本报告里同样可能出现密钥/源码（配置提取），保留敏感特征拦截
+# ---------------------------------------------------------------------
+response:
+  max_body_mb: 50
+  stop_on_secret_patterns: true
+  secret_patterns_ref: policy/patterns/secret.txt
+  row_counting:
+    prefer_total_fields: true
+    sample_rows_max: 3
+  pii_detector: { enabled: true, min_hits_to_count: 3 }
+
+# ---------------------------------------------------------------------
+# 终止与配合
+# ---------------------------------------------------------------------
+stop:
+  immediate_on:
+    - budget_exhausted
+    - secret_hit
+    - scope_uncertain
+    - sample_upload_attempt
+    - host_execution_attempt
+    - operator_hold
+  stop_all: true
+  keep_context_for_report: true
+  resume_requires: explicit_operator_answer
+  ambiguous_answer: ask_again
+  anomaly_detect:
+    http_5xx_rate: 0.2
+    waf_block_page: true
+    body_change_detect: false        # 离线域没有"目标页面"可对比
+    notify_operator: true
+
+# ---------------------------------------------------------------------
+# 上报：结论必须可复现（样本哈希 + 工具版本 + 命令）
+# ---------------------------------------------------------------------
+report:
+  required_fields:
+    - title
+    - vuln_class
+    - severity
+    - evidence
+    - repro_steps
+    - data_minimization_note
+    - cleanup_status
+    - product_artifacts
+    - rating_basis
+  redact: [secret, pii, source_code, credential]
+  one_finding_one_report: true
+  rating: objective_only
+  artifacts_dir: ./artifacts
+  purge_after_report: true
+
+compliance:
+  handshake_required: true
+  deployment_context_required: true
+  passive_only_when_context_missing: true
+  spec_version_pinned: "2.5"
+  strict_interpretation: true

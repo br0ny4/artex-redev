@@ -2,6 +2,37 @@
 
 本项目的重要变更记录在此文件中，格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [Unreleased]
+
+### 新增
+
+- **域包（domain pack）抽象**：策略不再是"一份 web-pentest 配置"，而是可选的域策略包。
+  部署上下文用 `engagement.pack` 选包（`ARTEX_POLICY_PACK` 可覆盖），`GET /api/policy/status`
+  与 `/system/policy` 页面显示当前包名；**未知包名直接报错**，不静默回退（回退会让人以为在跑
+  一套策略、实际跑另一套）。域包可声明部署上下文的必填项（`engagement_requirements`）。
+  `policy/embed.go` 的 `PackConfig`/`PackLexicon`/`AvailablePacks`，设计说明见
+  [`docs/redev/07-domain-packs.md`](docs/redev/07-domain-packs.md)。
+- **binary-re 离线域包**：样本/固件/恶意代码分析的首个离线包——出网只允许情报回源
+  （VirusTotal/MalwareBazaar/OTX + 上下文声明地址），`wine`/`qemu` 等能在宿主机跑样本的工具
+  默认禁用，情报查询 200 次/任务、1 rps、响应体 50MB 截断；红线新增 `R12_sample_upload`、
+  `R13_host_execution`，全量停止条件新增送检/宿主执行尝试；离线词表把 `submit`/`upload`/
+  `detonate` 归为 D 类（需显式授权）。附 `deployment-context.example.yaml` 模板。
+- `deploy` 之外新增文档：README「3.6 离线分析」与「3.5 MCP 工具模板」两节。
+
+### 变更
+
+- `policy/web-pentest/policy.yaml` 与 `binary-re/policy.yaml` 显式声明
+  `engagement_requirements`：在线域要求测试账号，离线域不要求（离线作业没有登录/通知/资金动作，
+  强填只会逼使用者造一个假账号）。漏写该字段仍按在线域（最严）校验。
+- 部署上下文可从 `ARTEX_ENGAGEMENT_FILE` 指向任一域包的模板；`engagement.pack` 决定策略。
+
+### 修复
+
+- `policy.New` 传入已解析词表时不建索引（`classOf`/`highRisk` 等只在 `NewLexicon` 里构建），
+  导致外部加载的域包词表把所有请求判成 unknown —— 现无条件调用 `NewLexicon`。
+- 离线域模板的授权窗口是示例日期，域包验收用例改为把窗口改到当前时间前后再跑，
+  避免把"不在授权时间窗"误当成域包选择失败。
+
 ## [Fork-0.2.0] - 2026-11-19
 
 ### 新增

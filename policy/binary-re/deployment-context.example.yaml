@@ -1,0 +1,87 @@
+# =====================================================================
+# 部署上下文 · 离线二进制分析域（binary_re）
+#
+# 与在线域的区别：这里的"授权范围"不是域名清单，而是
+#   1) 本地产物（样本/固件/软件包）与它们的只读副本目录；
+#   2) 允许的情报回源地址（只有查哈希/情报可以出网）；
+#   3) 声明过的沙箱（样本只能在那里执行）。
+#
+# 平台会读取 engagement.pack 选择域策略；缺任一必填项时只允许被动分析
+# （本地静态分析），不得出网、不得执行样本。
+# =====================================================================
+
+engagement:
+  id: BIN-2026-001
+  client: 示例安全实验室
+  title: 勒索样本家族逆向与 IOC 提取
+  # 离线域同样需要授权：分析客户样本、外发哈希都可能触犯保密约定
+  authorization_doc: ./docs/authorization/BIN-2026-001.pdf
+  authorization_doc_sha256: "0000000000000000000000000000000000000000000000000000000000000000"
+  pack: binary-re                 # ← 选择离线域策略包（不填 = web-pentest）
+  window:
+    starts_at: "2026-11-20T00:00:00+08:00"
+    ends_at: "2026-11-27T23:59:59+08:00"
+    timezone: Asia/Shanghai
+  contacts:
+    operator: 张三 <zhangsan@example.com>
+    client_poc: 李四 <lisi@example.com>
+    report_channel: https://lab.example.com/report/BIN-2026-001
+
+# --- 必填 1：产物与情报源 ---
+scope:
+  # 情报回源：只有这些地址允许出网（离线域没有"目标域名"概念，这里即 egress 白名单）
+  domains:
+    - www.virustotal.com
+    - mb-api.abuse.ch
+    - otx.alienvault.com
+  ips: []
+  cidrs: []
+  apps: []
+  apis: []
+  notes: |
+    样本目录只读挂载，分析在副本上做。除报告通道与上述情报源外一律不出网；
+    样本禁止上传到任何未在此声明的第三方服务（含公共沙箱、多引擎扫描）。
+  exclude: []
+  allowed_egress:
+    - https://lab.example.com/report/BIN-2026-001
+
+# --- 必填 2：沙箱声明（样本只能在声明过的环境执行；未声明 = 不允许执行）---
+# 平台当前对"宿主机执行样本"没有硬判定谓词，这一项是操作员承诺 + 审计依据，
+# 与 L2 出网收口、guard 审批配合使用；不要在业务主机上执行样本。
+test_accounts: []
+
+# --- 必填 3：允许工具（离线分析工具默认可用；能跑样本的模拟器需说明）---
+allowed_tools:
+  always: [rabin2, r2, r2pipe, objdump, strings, file, xxd, sha256sum, 7z, binwalk]
+  per_use:
+    - ghidra
+    - objdump            # 交叉引用/节表等重活
+    - capa
+    - floss
+    - yara
+  denied: [wine, qemu-system-x86_64, qemu-x86_64, box64]   # 宿主机执行样本的工具
+
+# --- 必填 4：报告出口 ---
+report:
+  channel: https://lab.example.com/report/BIN-2026-001
+  format: markdown
+  attachments_allowed: [txt, json, png]
+
+# --- 必填 5：产物目录（样本副本与提取物集中在这里，任务结束统一审计）---
+artifacts:
+  dir: ./artifacts/BIN-2026-001
+  max_total_mb: 5000
+  purge_after_report: true
+  purge_grace_days: 14
+
+# --- 预算覆盖（只能更严，不能更松）---
+budget_overrides:
+  total_requests_per_task: 100   # 情报查询次数上限
+  rate_rps_per_host: 1
+  response_body_max_mb: 50
+
+# --- 合规声明 ---
+compliance:
+  spec_version: "2.5"
+  handshake: "[RULES_LOADED v2.5]"
+  operator_acknowledged: true
