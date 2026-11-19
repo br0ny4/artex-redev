@@ -49,7 +49,8 @@ jobs:
       - name: gofmt（新增代码）
         run: |
           set -e
-          files="$(gofmt -l policy traffic/policy.go traffic/policy_test.go guard server/login_limiter.go server/policy_audit.go server/policy_api.go db/policy_audit.go db/policy_audit_test.go)"
+          files="$(gofmt -l $(git ls-files 'policy/*.go' 'traffic/policy*.go' 'guard/*.go' \
+            'server/login_limiter*.go' 'server/policy_*.go' 'db/policy_*.go'))"
           if [ -n "$files" ]; then
             echo "以下文件需要 gofmt -w："
             echo "$files"
