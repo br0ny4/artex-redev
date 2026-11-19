@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/br0ny4/artex-redev/policy"
 	"github.com/Autumn-27/norma/hook"
+	"github.com/br0ny4/artex-redev/policy"
 )
 
 func testEngine(t *testing.T, mode string) *policy.Engine {
