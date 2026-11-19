@@ -1,6 +1,6 @@
 # 07 · 域包（domain pack）：同一套执行层，不同域策略
 
-> 状态：web-pentest ✅ / binary-re ✅ / source-audit ✅ / malware-triage 📋
+> 状态：web-pentest ✅ / binary-re ✅ / source-audit ✅ / malware-triage ✅
 > 代码：`policy/embed.go`、`policy/{web-pentest,binary-re}/`、`policy/packs_test.go`
 
 ## 1. 为什么要域包
@@ -82,6 +82,20 @@ engagement:
   在上下文里显式加白名单，否则判定会挡住（这是有意的）。
 - 同样诚实说明：已有谓词覆盖"已知外传工具 + 已知目的地"，但"把代码片段贴进允许域名"这类
   通道判定尚无谓词，靠出网白名单 + L2 出网收口兜底。
+
+## 3.6 malware-triage 包额外说明
+
+和 binary_re 的分工是**深度**而不是领域：
+
+| | binary-re | malware-triage |
+|---|---|---|
+| 目标 | 反汇编/反编译、算法还原、漏洞定位 | 是什么、什么家族、有什么能力、IOC 清单 |
+| 样本执行 | 允许，但只能在声明过的沙箱（R13 沙箱外执行） | **一律不执行**（R13 `execute_sample_at_all`，命中即全量停止） |
+| 工具 | radare2/Ghidra/objdump/capa/YARA/FLOSS | file/hash/strings/exiftool/olevba/capa/YARA/FLOSS/diec |
+| 预算 | 情报查询 200 次/任务 | 100 次/任务（批量分诊时每个样本都要省） |
+
+应急响应前一小时用分诊包批量分类，需要动手挖的时候换 binary_re（并走沙箱审批）。
+两个包都支持同一套判定、审计与全量停止，切换只改部署上下文的 `engagement.pack`。
 
 ## 4. 新增一个域包
 

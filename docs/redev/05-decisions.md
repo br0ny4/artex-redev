@@ -136,6 +136,7 @@
 | 域包抽象：`engagement.pack` 选包、未知包报错、`ARTEX_POLICY_PACK` 覆盖、状态展示 pack | ✅ | `policy/embed.go`、`policy/packs_test.go` |
 | binary-re 离线域包：情报回源白名单、禁宿主模拟器、送检审授权、R12/R13 红线 | ✅ | `policy/binary-re/` + 测试（[07](07-domain-packs.md)） |
 | source-audit 源码审计域包：目录清单授权（`scope.local_paths`）、零出网、禁外传命令、R14/R15 红线 | ✅ | `policy/source-audit/` + 测试（[07](07-domain-packs.md)） |
+| malware-triage 分诊域包：一律不执行样本（R13 `execute_sample_at_all`）、分诊工具白名单、更紧预算 | ✅ | `policy/malware-triage/` + 测试（[07](07-domain-packs.md)） |
 | 域包级部署上下文必填项（`engagement_requirements`，离线域不要求测试账号） | ✅ | `policy/config.go` |
 | 策略状态进仪表盘：顶部停止横幅、规范执行（pack/状态）、近 100 条判定拦截数 | ✅ | `web/src/app/(main)/dashboard/page.tsx` |
 | **未做**：合规矩阵端到端用例（当前各层单测已覆盖） | ⬜ | 下一个切片 |
@@ -144,7 +145,7 @@
 
 # 下一步（自主执行顺序）
 
-1. **其余离线域包**：`malware_triage`（capa/YARA/FLOSS）——按 07 文档"新增包五步"复制（binary_re / source-audit 已跑通）。
+1. **在线域扩展**：`bounty_recon`（侦察/资产梳理，继承 web-pentest 但更宽的只读面）与 CDP 浏览器分析域。
 2. **预算余量进仪表盘**：挂起数/拦截数/当前域包已上首页；预算余量与域包级指标（情报查询余量）仍缺。
 3. **合规矩阵端到端**：把 04 §8 的用例扩成端到端（起代理 → 发请求 → 断言 403/截断/挂起）。
 4. **L2 之外**：非 compose 部署的 netns 脚本化（`deploy/egress-lockdown/README.md` 已给模板）。

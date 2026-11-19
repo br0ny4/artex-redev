@@ -14,7 +14,7 @@ import (
 func TestAvailablePacks(t *testing.T) {
 	got := AvailablePacks()
 	joined := strings.Join(got, ",")
-	for _, want := range []string{"web-pentest", "binary-re", "source-audit"} {
+	for _, want := range []string{"web-pentest", "binary-re", "source-audit", "malware-triage"} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("域包列表缺少 %s：%v", want, got)
 		}
@@ -100,6 +100,32 @@ func TestInstallSourceAuditPack(t *testing.T) {
 	}
 	if d := eng.DecideRequest(context.Background(), "t", req("GET", "unknown.example.net", "/")); d.Action == ActionAllow {
 		t.Fatalf("源码审计域不该允许出网，得到 %v(%s)", d.Action, d.Reason)
+	}
+}
+
+// 分诊包与 binary_re 的分工要在配置里体现：分诊一律不执行样本、预算更紧。
+func TestPackConfigMalwareTriage(t *testing.T) {
+	cfg, err := PackConfig("malware-triage")
+	if err != nil {
+		t.Fatalf("加载 malware-triage: %v", err)
+	}
+	if cfg.Spec.ID != "offline-malware-triage" {
+		t.Fatalf("spec.id=%q", cfg.Spec.ID)
+	}
+	if cfg.Budget.TotalRequestsPerTask >= 200 {
+		t.Fatalf("分诊预算应比深挖更紧，得到 %v", cfg.Budget.TotalRequestsPerTask)
+	}
+	if !strings.Contains(strings.Join(cfg.Tools.DefaultDenyBinaries, ","), "gdb") {
+		t.Fatalf("分诊不该允许调试器：%v", cfg.Tools.DefaultDenyBinaries)
+	}
+	// 分诊的 R13 是"一律不执行"，而不是 binary_re 的"沙箱外执行"（红线不进 Config 模型，
+	// 这里直接核对 yaml 原文，避免"文档说一套、判定跑另一套"）。
+	raw, err := os.ReadFile("malware-triage/policy.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), "execute_sample_at_all") {
+		t.Fatal("R13 应为 execute_sample_at_all：分诊阶段不得执行样本")
 	}
 }
 

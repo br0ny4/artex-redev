@@ -27,7 +27,7 @@ import (
 var (
 	// 域包各自一份策略配置与语义词表。目录名即域包名（web-pentest / binary-re ...）。
 	// 用 embed.FS 而不是逐文件 embed：新增域包只加目录，不改 embed 指令的形状。
-	//go:embed web-pentest binary-re source-audit
+	//go:embed web-pentest binary-re source-audit malware-triage
 	packsFS embed.FS
 
 	//go:embed patterns/secret.txt

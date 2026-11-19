@@ -2,6 +2,16 @@
 
 本项目的重要变更记录在此文件中，格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [Unreleased]
+
+### 新增
+
+- **malware-triage 样本分诊域包**：应急响应第一小时的批量分类——出网只允许情报回源，
+  **一律不执行样本**（红线 `R13 execute_sample_at_all`，命中即全量停止；需要动态行为换
+  `binary-re` 并走沙箱审批），样本上传仍需显式授权（`R12`）；工具面向分诊
+  （file/hash/strings/exiftool/olevba/capa/YARA/FLOSS/diec），`wine`/`qemu`/`gdb`/`strace`
+  默认禁用；情报查询预算收紧到 100 次/任务。README 新增「3.8 样本分诊」。
+
 ## [Fork-0.3.0] - 2026-11-19
 
 ### 新增
