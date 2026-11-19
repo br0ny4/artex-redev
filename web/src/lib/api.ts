@@ -69,6 +69,10 @@ import type {
   NotificationDelivery,
   NotificationFilter,
   NotificationMeta,
+  PolicyDecision,
+  PolicyEngineHold,
+  PolicyHold,
+  PolicyStatus,
   PromptVar,
   PromptVersion,
   SessionTokenUsage,
@@ -826,8 +830,7 @@ export const api = {
   // 渠道是多实例资源（同一类型可配多个机器人、各有过滤规则），因此独立成组，
   // 不塞进扁平的 settings 键值里。
   notifyMeta: () => get<NotificationMeta>(`/notify/meta`),
-  notifyChannels: () =>
-    get<{ channels: NotificationChannel[] }>(`/notify/channels`).then((r) => arr(r.channels)),
+  notifyChannels: () => get<{ channels: NotificationChannel[] }>(`/notify/channels`).then((r) => arr(r.channels)),
   notifyCreateChannel: (payload: {
     name: string;
     kind: string;
@@ -1193,6 +1196,24 @@ export const api = {
     post<{ ok: boolean }>("/visibility/skill/toggle", { agent_id: agentId, skill_name: skillName, visible }),
 
   // ---- intercept rules ----
+  // ---- 规范执行层 ----
+  policyStatus: () => get<PolicyStatus>("/policy/status"),
+  policyDecisions: (limit = 100) =>
+    get<{ decisions: PolicyDecision[] | null; count: number }>(`/policy/decisions?limit=${limit}`).then((r) =>
+      arr(r.decisions),
+    ),
+  policyChain: () => get<{ ok: boolean; verified?: number; error?: string }>("/policy/chain"),
+  policyHolds: (all = false, limit = 100) =>
+    get<{ holds: PolicyHold[] | null; engine_hold?: PolicyEngineHold }>(
+      all ? `/policy/holds?all=1&limit=${limit}` : "/policy/holds",
+    ).then((r) => ({ holds: arr(r.holds), engine_hold: r.engine_hold })),
+  // answerPolicyHold 答复并（可选）恢复。resume=false 只记录答复，测试仍停止。
+  answerPolicyHold: (id: number, answer: string, resume: boolean) =>
+    post<{ ok: boolean; resumed: boolean; resume_intent: boolean }>(`/policy/holds/${id}/answer`, {
+      answer,
+      resume,
+    }),
+
   interceptRules: () => get<{ rules: InterceptRule[] }>("/intercept/rules").then((r) => arr(r.rules)),
   createInterceptRule: (rule: Omit<InterceptRule, "id" | "created_at" | "updated_at">) =>
     post<InterceptRule>("/intercept/rules", rule),

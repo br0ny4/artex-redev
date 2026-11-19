@@ -155,27 +155,28 @@ type ComplianceConfig struct {
 
 // Engagement 是一次授权测试的完整上下文。缺任一必填项 → ErrContextIncomplete，
 // 任务只能做被动分析（规范 9.2）。
+// Engagement 的 json tag 只为 /api/policy/status 的展示服务；授权文件仍然只读 yaml。
 type Engagement struct {
-	ID         string         `yaml:"id"`
-	Client     string         `yaml:"client"`
-	Title      string         `yaml:"title"`
-	AuthDoc    string         `yaml:"authorization_doc"`
-	AuthSHA    string         `yaml:"authorization_doc_sha256"`
-	Window     Window         `yaml:"window"`
-	Contacts   Contacts       `yaml:"contacts"`
-	Scope      EngScope       `yaml:"scope"`
-	Accounts   []Account      `yaml:"test_accounts"`
-	Tools      EngTools       `yaml:"allowed_tools"`
-	Report     EngReport      `yaml:"report"`
-	Artifacts  Artifacts      `yaml:"artifacts"`
-	Overrides  map[string]any `yaml:"budget_overrides"`
-	Compliance EngCompliance  `yaml:"compliance"`
+	ID         string         `yaml:"id" json:"id"`
+	Client     string         `yaml:"client" json:"client"`
+	Title      string         `yaml:"title" json:"title"`
+	AuthDoc    string         `yaml:"authorization_doc" json:"authorization_doc"`
+	AuthSHA    string         `yaml:"authorization_doc_sha256" json:"authorization_doc_sha256"`
+	Window     Window         `yaml:"window" json:"window"`
+	Contacts   Contacts       `yaml:"contacts" json:"contacts"`
+	Scope      EngScope       `yaml:"scope" json:"scope"`
+	Accounts   []Account      `yaml:"test_accounts" json:"test_accounts"`
+	Tools      EngTools       `yaml:"allowed_tools" json:"allowed_tools"`
+	Report     EngReport      `yaml:"report" json:"report"`
+	Artifacts  Artifacts      `yaml:"artifacts" json:"artifacts"`
+	Overrides  map[string]any `yaml:"budget_overrides" json:"budget_overrides"`
+	Compliance EngCompliance  `yaml:"compliance" json:"compliance"`
 }
 
 type Window struct {
-	StartsAt string `yaml:"starts_at"`
-	EndsAt   string `yaml:"ends_at"`
-	Timezone string `yaml:"timezone"`
+	StartsAt string `yaml:"starts_at" json:"starts_at"`
+	EndsAt   string `yaml:"ends_at" json:"ends_at"`
+	Timezone string `yaml:"timezone" json:"timezone"`
 }
 
 type Contacts struct {
@@ -185,14 +186,14 @@ type Contacts struct {
 }
 
 type EngScope struct {
-	Domains []string `yaml:"domains"`
-	IPs     []string `yaml:"ips"`
-	CIDRs   []string `yaml:"cidrs"`
-	Apps    []string `yaml:"apps"`
-	APIs    []string `yaml:"apis"`
-	Notes   string   `yaml:"notes"`
-	Exclude []string `yaml:"exclude"`
-	Egress  []string `yaml:"allowed_egress"`
+	Domains []string `yaml:"domains" json:"domains"`
+	IPs     []string `yaml:"ips" json:"ips"`
+	CIDRs   []string `yaml:"cidrs" json:"cidrs"`
+	Apps    []string `yaml:"apps" json:"apps"`
+	APIs    []string `yaml:"apis" json:"apis"`
+	Notes   string   `yaml:"notes" json:"notes"`
+	Exclude []string `yaml:"exclude" json:"exclude"`
+	Egress  []string `yaml:"allowed_egress" json:"allowed_egress"`
 }
 
 type Account struct {

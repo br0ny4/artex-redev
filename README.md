@@ -127,6 +127,8 @@ export ARTEX_ENGAGEMENT_FILE=./policy/web-pentest/deployment-context.yaml
 **需要人确认时全量停止**（规范 7.3）：范围归属不明 / 接口语义判不清 / 预算耗尽时，平台会挂起整个
 engagement，把问题原样转给操作员；未获明确答复前所有请求与命令都被挡下。
 
+页面入口：**系统 → 规范执行**（`/system/policy`），可直接答复挂起、看判定流水、校验审计链。
+
 ```bash
 curl /api/policy/holds                        # 看当前挂起与问题
 curl -X POST /api/policy/holds/{id}/answer \

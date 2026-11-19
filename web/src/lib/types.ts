@@ -1610,3 +1610,83 @@ export interface InterceptExecution {
   seq: number;
   items: Activity[];
 }
+
+// ---- 规范执行层（policy）----
+
+/** 一次"全局挂起"（规范 7.3）：整个 engagement 停下来等操作员答复。 */
+export interface PolicyHold {
+  id: number;
+  task_id: string;
+  engagement_id: string;
+  engine_hold_id: number;
+  /** SCOPE_UNCERTAIN / SEMANTICS_UNCERTAIN / BUDGET_EXHAUSTED … */
+  reason: string;
+  question: string;
+  status: "open" | "answered" | "resumed" | "expired" | string;
+  answer: string;
+  answered_by: string;
+  created_at: string;
+  answered_at: string | null;
+}
+
+/** 引擎内存中的当前挂起：与 DB 记录不同，它代表"此刻是否仍在停止"。 */
+export interface PolicyEngineHold {
+  id: number;
+  rule: string;
+  reason: string;
+  question: string;
+  since: string;
+}
+
+export interface PolicyEngagement {
+  id?: string;
+  client?: string;
+  title?: string;
+  authorization_doc?: string;
+  authorization_doc_sha256?: string;
+  window?: { starts_at?: string; ends_at?: string; timezone?: string };
+  scope?: {
+    domains?: string[];
+    ips?: string[];
+    cidrs?: string[];
+    apps?: string[];
+    apis?: string[];
+    exclude?: string[];
+    allowed_egress?: string[];
+    notes?: string;
+  };
+  artifacts?: { http_body?: Record<string, unknown> };
+  spec?: string;
+}
+
+export interface PolicyStatus {
+  enabled: boolean;
+  /** enabled=false 时的原因（未配置 ARTEX_ENGAGEMENT_FILE 等）。 */
+  reason?: string;
+  mode?: string;
+  enforcing?: boolean;
+  spec_version?: string;
+  handshake?: string;
+  engagement?: PolicyEngagement;
+}
+
+/** 一条判定审计（只写不改，靠 hash chain 保证不被篡改）。 */
+export interface PolicyDecision {
+  id: number;
+  ts: string;
+  engagement_id: string;
+  task_id: string;
+  /** L1-command | L3-request | L3-response | L5-hold */
+  source: string;
+  host: string;
+  method: string;
+  path: string;
+  class: string;
+  /** deny | hold | warn */
+  action: string;
+  rule: string;
+  reason: string;
+  budget?: Record<string, number>;
+  prev_hash: string;
+  hash: string;
+}
