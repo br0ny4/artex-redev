@@ -71,7 +71,7 @@ FLASH 通报，全球金融/政府/科技/国防等行业受影响；公网上�
 | P1.7 | `/api/auth/init` 一次性 setup token + 前端配合 | ✅ |
 | P2 | 离线域包：`binary_re`（radare2-mcp / Ghidra headless）✅、`source_audit`（Semgrep/Joern/ast-grep）✅、`malware_triage`（capa/YARA/FLOSS）✅ | 🚧 在线域 `bounty_recon`、CDP 浏览器分析 |
 | P2.5 | 0day 流水线：攻击面提取 → 候选 → 可达性 → **触发验证**（无 PoC 不算 finding） | 📋 |
-| P3 | 在线域包：`web_pentest`（继承 ARTEX）+ `bounty_recon` + CDP 浏览器分析 | 🚧 |
+| P3 | 在线域包：`web_pentest`（继承 ARTEX）✅ + `bounty_recon` + CDP 浏览器分析 | 🚧 |
 | P4 | 蓝队域包（检测工程 + agentic 攻击者检测规则）、多域报告、测评台（XBOW 104） | 📋 |
 
 已落地的实现与"为什么这么定"记录在 [`docs/redev/05-decisions.md`](docs/redev/05-decisions.md)；
