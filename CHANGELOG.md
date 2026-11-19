@@ -17,6 +17,12 @@
   `ARTEX_SETUP_TOKEN` 固定），并有失败限速；setup 页新增口令输入框。未认证抢占是公网
   实例最常见失陷路径。
 
+### 测试
+
+- `server/policy_e2e_test.go`：初始化口令门禁（无口令/错口令/正确口令/重复初始化）与
+  挂起闭环（真实判定链触发 SCOPE_UNCERTAIN → 落库 → 空答复拒绝恢复 → 只答复仍停止 →
+  答复并恢复）走真实 HTTP mux 与真实 PG。
+
 ### 变更
 
 - `/api/policy/status` 的授权上下文改用 snake_case 字段（`Engagement`/`Window`/`EngScope`
@@ -26,6 +32,18 @@
 
 - CI 单元测试对**失败的包**自动重跑一次：上游遗留用例在测试结束后仍有后台协程写工作
   目录（`TempDir RemoveAll: directory not empty`），按用例名 skip 是打地鼠。
+- **部署上下文模板加载不了（策略静默失效）**：随仓库发布的
+  `policy/web-pentest/deployment-context.example.yaml` 用 `engagement:` 包住身份、`scope`
+  等块在顶层，而 `policy.LoadEngagement` 只认扁平字段——照着文档填的
+  `ARTEX_ENGAGEMENT_FILE` 永远装不上引擎，使用者以为已被保护、实际一条判定都没生效。
+  改为两种写法都支持，并加回归用例读模板文件（`TestLoadEngagementAcceptsShippedTemplate`）。
+- **"仅记录答复"后无法再恢复**：挂起记录答复过一次就置为 `answered`，接口只接受 `open`
+  → 全量停止变成永久停止，操作员只能等下一次判定重新挂起才解得开。现在答复接口允许对
+  `answered` 记录再次答复，列表也会把"引擎仍在停、但记录已 answered"的那条带回来，操作台
+  横幅可直接答复并恢复。
+- 仓库里的 shell 脚本（`build.sh` 等 7 个）丢了可执行位，`v0.2.0` 的 release 构建因此
+  以 126 Permission denied 失败；恢复 755 并让 workflow 用 `bash ./build.sh` 调用，
+  避免再次被文件模式拖垮发布。
 
 ## [Fork-0.1.0] - 2026-11-19
 

@@ -93,3 +93,31 @@ func TestInstallFromFileRejectsIncompleteContext(t *testing.T) {
 func writeFile(path, body string) error {
 	return os.WriteFile(path, []byte(body), 0o600)
 }
+
+// TestLoadEngagementAcceptsShippedTemplate 守住"文档模板必须能被引擎直接读取"。
+//
+// 这条曾经是真的坏过：模板用 engagement: 包一层、scope 在顶层，而 LoadEngagement
+// 只认扁平写法——照模板填的授权文件永远装不上引擎，策略静默失效。模板与解析器
+// 分属不同文件，没有用例就会再次漂移。
+func TestLoadEngagementAcceptsShippedTemplate(t *testing.T) {
+	raw, err := os.ReadFile("web-pentest/deployment-context.example.yaml")
+	if err != nil {
+		t.Fatalf("读取随仓库发布的模板: %v", err)
+	}
+	e, err := LoadEngagement(raw)
+	if err != nil {
+		t.Fatalf("模板必须能被直接加载（否则策略静默失效）: %v", err)
+	}
+	if len(e.Scope.Domains) == 0 {
+		t.Fatal("顶层 scope 应合并进 Engagement.Scope")
+	}
+	if len(e.Accounts) == 0 {
+		t.Fatal("顶层 test_accounts 应合并进 Engagement.Accounts")
+	}
+	if e.Report.Channel == "" || e.Artifacts.Dir == "" {
+		t.Fatalf("顶层 report/artifacts 未合并: report=%q artifacts=%q", e.Report.Channel, e.Artifacts.Dir)
+	}
+	if e.ID == "" || e.Client == "" {
+		t.Fatalf("engagement: 段未解析: id=%q client=%q", e.ID, e.Client)
+	}
+}

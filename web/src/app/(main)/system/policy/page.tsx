@@ -155,6 +155,11 @@ export default function PolicyPage() {
 
   // 引擎内存里的挂起是"此刻是否仍在停止"的真相；DB 记录只是它的持久化副本。
   const openHold = holds.find((h) => h.status === "open");
+  // 引擎仍在停止时，对应记录可能已经是 answered（操作员先记一笔"还在确认"）：
+  // 这种记录仍要能答复并 resume，否则全量停止就再也解不开了。
+  const blockingHold = engineHold ? holds.find((h) => h.engine_hold_id === engineHold.id) : undefined;
+  const answerableHold = blockingHold ?? openHold;
+  const canAnswer = (h: PolicyHold) => h.status === "open" || h.status === "answered";
   const activeHold = engineHold
     ? { code: engineHold.rule, text: engineHold.reason, question: engineHold.question, since: engineHold.since }
     : openHold
@@ -199,11 +204,11 @@ export default function PolicyPage() {
               规范 7.3：停止是全量的，不是单接口的。未获得明确答复前，所有请求与命令都会被挡下。
             </p>
             <div className="flex flex-wrap gap-2">
-              {openHold ? (
+              {answerableHold && canAnswer(answerableHold) ? (
                 <Button
                   size="sm"
                   onClick={() => {
-                    setAnswering(openHold);
+                    setAnswering(answerableHold);
                     setAnswerText("");
                   }}
                 >
@@ -338,11 +343,17 @@ export ARTEX_ENGAGEMENT_FILE=/etc/artex/engagement.yaml
                         <TableCell className="text-xs text-muted-foreground">{fmtTime(h.created_at)}</TableCell>
                         <TableCell>
                           <Badge variant={h.status === "open" ? "default" : "secondary"}>
-                            {h.status === "open" ? "等待答复" : h.status === "resumed" ? "已恢复" : h.status}
+                            {h.status === "open"
+                              ? "等待答复"
+                              : h.status === "resumed"
+                                ? "已恢复"
+                                : h.status === "answered"
+                                  ? "已答复·仍停止"
+                                  : h.status}
                           </Badge>
                         </TableCell>
                         <TableCell>
-                          {h.status === "open" && (
+                          {canAnswer(h) && (
                             <Button
                               size="sm"
                               variant="outline"

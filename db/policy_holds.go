@@ -51,6 +51,10 @@ VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`,
 
 // AnswerPolicyHold 记录操作员答复。resume=true 表示"确认可以继续"，status 置 resumed；
 // 否则置 answered（答复了但仍不允许恢复，需要进一步处理）。
+//
+// answered 的记录仍然可以再答一次：操作员先记一笔"还在确认"，之后拿到客户确认再
+// resume 是正常流程——若这里只允许 open→answered，全量停止会因为"已经答过"变成
+// 永久停止，只能等下一次判定重新挂起才能解开，那不是规范 7.3 的意思。
 func (d *DB) AnswerPolicyHold(ctx context.Context, id int64, answer, answeredBy string, resume bool) error {
 	status := "answered"
 	if resume {
@@ -59,7 +63,7 @@ func (d *DB) AnswerPolicyHold(ctx context.Context, id int64, answer, answeredBy 
 	res, err := d.ExecContext(ctx, `
 UPDATE policy_holds
 SET status=$2, answer=$3, answered_by=$4, answered_at=now()
-WHERE id=$1 AND status='open'`, id, status, answer, answeredBy)
+WHERE id=$1 AND status IN ('open','answered')`, id, status, answer, answeredBy)
 	if err != nil {
 		return err
 	}
@@ -88,7 +92,8 @@ func scanPolicyHold(rows interface {
 	return h, nil
 }
 
-// ListOpenPolicyHolds 返回所有未处理的挂起（新→旧）。
+// GetPolicyHoldByEngineID 按引擎挂起 id 取记录（引擎内存里的挂起是"此刻是否停止"的
+// 真相，DB 行是它的持久化副本；两者要对得上才能答复）。
 func (d *DB) ListOpenPolicyHolds(ctx context.Context) ([]PolicyHold, error) {
 	rows, err := d.QueryContext(ctx,
 		`SELECT `+policyHoldCols+` FROM policy_holds WHERE status='open' ORDER BY id DESC`)
@@ -105,6 +110,23 @@ func (d *DB) ListOpenPolicyHolds(ctx context.Context) ([]PolicyHold, error) {
 		out = append(out, h)
 	}
 	return out, rows.Err()
+}
+
+func (d *DB) GetPolicyHoldByEngineID(ctx context.Context, engineHoldID int64) (*PolicyHold, error) {
+	if engineHoldID <= 0 {
+		return nil, nil
+	}
+	row := d.QueryRowContext(ctx,
+		`SELECT `+policyHoldCols+` FROM policy_holds WHERE engine_hold_id=$1 ORDER BY id DESC LIMIT 1`,
+		engineHoldID)
+	h, err := scanPolicyHold(row)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &h, nil
 }
 
 // ListPolicyHolds 返回最近的挂起记录（含已处理），用于审计/排查。

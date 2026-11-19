@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/br0ny4/artex-redev/db"
 	"github.com/br0ny4/artex-redev/policy"
 )
 
@@ -44,6 +45,22 @@ func (s *Server) pgPolicyHolds(w http.ResponseWriter, r *http.Request) {
 	if eng != nil {
 		if h, ok := eng.ActiveHold(); ok {
 			resp["engine_hold"] = h
+			// 引擎仍在停止，但对应记录已经是 answered（操作员先记了一笔）：必须把它
+			// 一并返回，否则界面拿不到 DB id，永远无法 resume——全量停止就成了永久停止。
+			if list, ok := holds.([]db.PolicyHold); ok {
+				found := false
+				for _, row := range list {
+					if row.EngineHoldID == h.ID && row.Status != "resumed" {
+						found = true
+						break
+					}
+				}
+				if !found {
+					if row, err := pg.GetPolicyHoldByEngineID(r.Context(), h.ID); err == nil && row != nil && row.Status != "resumed" {
+						resp["holds"] = append([]db.PolicyHold{*row}, list...)
+					}
+				}
+			}
 		}
 	}
 	writeJSON(w, 200, resp)
@@ -85,7 +102,8 @@ func (s *Server) pgPolicyAnswerHold(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 404, "挂起记录不存在")
 		return
 	}
-	if hold.Status != "open" {
+	// answered 允许再答：先记录答复、后拿到客户确认再 resume 是正常流程。
+	if hold.Status != "open" && hold.Status != "answered" {
 		writeErr(w, 409, "该挂起已处理（状态："+hold.Status+"）")
 		return
 	}

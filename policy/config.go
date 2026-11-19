@@ -239,10 +239,58 @@ var ErrContextIncomplete = errors.New("部署上下文不完整：只允许被�
 var reHex64 = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
 // LoadEngagement 解析 deployment-context YAML 并做必填校验。
+// LoadEngagement 解析部署上下文。
+//
+// 支持两种写法，因为规范文档给的模板与"引擎直接读"的形态不一样：
+//  1. 规范模板（deployment-context.example.yaml）：engagement 包住身份信息，
+//     scope / test_accounts / allowed_tools / report / artifacts / compliance 在顶层；
+//  2. 扁平写法：所有字段直接挂在顶层（便于脚本生成）。
+//
+// 之前这里只认扁平写法，导致照着模板填的部署上下文永远装不上引擎——策略静默失效，
+// 而使用者以为已经在保护范围内。两端必须能直接对上，模板改引擎不改是不可接受的。
 func LoadEngagement(raw []byte) (*Engagement, error) {
-	var e Engagement
-	if err := yaml.Unmarshal(raw, &e); err != nil {
+	var doc struct {
+		Engagement      *Engagement    `yaml:"engagement"`
+		Scope           *EngScope      `yaml:"scope"`
+		TestAccounts    []Account      `yaml:"test_accounts"`
+		AllowedTools    *EngTools      `yaml:"allowed_tools"`
+		Report          *EngReport     `yaml:"report"`
+		Artifacts       *Artifacts     `yaml:"artifacts"`
+		BudgetOverrides map[string]any `yaml:"budget_overrides"`
+		Compliance      *EngCompliance `yaml:"compliance"`
+	}
+	if err := yaml.Unmarshal(raw, &doc); err != nil {
 		return nil, fmt.Errorf("解析部署上下文: %w", err)
+	}
+	var e Engagement
+	if doc.Engagement != nil {
+		e = *doc.Engagement
+		if doc.Scope != nil {
+			e.Scope = *doc.Scope
+		}
+		if len(doc.TestAccounts) > 0 {
+			e.Accounts = doc.TestAccounts
+		}
+		if doc.AllowedTools != nil {
+			e.Tools = *doc.AllowedTools
+		}
+		if doc.Report != nil {
+			e.Report = *doc.Report
+		}
+		if doc.Artifacts != nil {
+			e.Artifacts = *doc.Artifacts
+		}
+		if len(doc.BudgetOverrides) > 0 {
+			e.Overrides = doc.BudgetOverrides
+		}
+		if doc.Compliance != nil {
+			e.Compliance = *doc.Compliance
+		}
+	} else {
+		// 扁平写法（旧行为）。
+		if err := yaml.Unmarshal(raw, &e); err != nil {
+			return nil, fmt.Errorf("解析部署上下文: %w", err)
+		}
 	}
 	if err := e.Validate(); err != nil {
 		return nil, err
