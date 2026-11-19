@@ -1416,6 +1416,7 @@ CREATE TABLE IF NOT EXISTS policy_holds (
     task_id     TEXT NOT NULL,
     engagement_id TEXT NOT NULL DEFAULT '',
     reason      TEXT NOT NULL,                -- 对应 stop.immediate_on 的取值
+    engine_hold_id BIGINT NOT NULL DEFAULT 0, -- policy.Engine 全局挂起 id
     question    TEXT NOT NULL,
     status      TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open','answered','resumed','expired')),
     answer      TEXT NOT NULL DEFAULT '',
@@ -1423,4 +1424,6 @@ CREATE TABLE IF NOT EXISTS policy_holds (
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
     answered_at TIMESTAMPTZ
 );
+-- 旧库补列（幂等）
+ALTER TABLE policy_holds ADD COLUMN IF NOT EXISTS engine_hold_id BIGINT NOT NULL DEFAULT 0;
 CREATE INDEX IF NOT EXISTS idx_policy_holds_task ON policy_holds(task_id, status);

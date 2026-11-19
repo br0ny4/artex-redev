@@ -19,6 +19,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Autumn-27/norma/llm"
+	actool "github.com/Autumn-27/norma/tool"
+	"github.com/Autumn-27/norma/transcript"
 	"github.com/br0ny4/artex-redev/agent"
 	"github.com/br0ny4/artex-redev/db"
 	"github.com/br0ny4/artex-redev/intercept"
@@ -26,9 +29,6 @@ import (
 	"github.com/br0ny4/artex-redev/llmrec"
 	"github.com/br0ny4/artex-redev/report"
 	"github.com/br0ny4/artex-redev/traffic"
-	"github.com/Autumn-27/norma/llm"
-	actool "github.com/Autumn-27/norma/tool"
-	"github.com/Autumn-27/norma/transcript"
 )
 
 // BuildVersion is the backend application version, injected from cmd/artex at
@@ -43,9 +43,10 @@ type Server struct {
 	engine *Engine
 	ctx    context.Context
 
-	skillDir string        // root directory for skill subdirectories
-	jwtKey   []byte        // HS256 signing key loaded from / generated into dataDir/jwt.key
-	login    *loginLimiter // 登录失败限速（P0 硬化）
+	skillDir   string        // root directory for skill subdirectories
+	jwtKey     []byte        // HS256 signing key loaded from / generated into dataDir/jwt.key
+	login      *loginLimiter // 登录失败限速（P0 硬化）
+	setupToken string        // /setup 初始化口令（启动日志打印，P0 硬化）
 
 	// concMu serializes concurrency-cap decisions (admission + reconcile) so a
 	// scheduler tick and an HTTP settings change / task creation can't both count
@@ -146,12 +147,14 @@ func New(ctx context.Context, m *Manager, skillDir string, dataDir string, keyDi
 	if err != nil {
 		log.Fatalf("[auth] JWT key: %v", err)
 	}
-	s := &Server{m: m, engine: NewEngine(m), ctx: ctx, skillDir: skillDir, jwtKey: key, login: newLoginLimiter(), chatBusy: map[string]bool{},
+	s := &Server{m: m, engine: NewEngine(m), ctx: ctx, skillDir: skillDir, jwtKey: key, login: newLoginLimiter(), setupToken: loadOrCreateSetupToken(), chatBusy: map[string]bool{},
 		chatCancel: map[string]context.CancelCauseFunc{}, triggerQ: map[string][]triggeredRun{},
 		triggerActive: map[string]int{}, triggerCfg: map[string]triggerBehavior{},
 		profChatAgents: map[int64]*agent.ChatAgent{},
 		provByProfile:  map[int64]*provEntry{}, llmHealth: newLLMHealthRegistry(m.pg),
 		taskAgents: map[string]*taskAgentBundle{}, archiveWake: make(chan struct{}, 1)}
+	// 初始化口令只在启动日志里出现：能看日志 = 有资格初始化（P0 硬化）。
+	log.Printf("[auth] 初始化口令（首次 /setup 需要；可用 ARTEX_SETUP_TOKEN 覆盖）：%s", s.setupToken)
 	s.initSideQuestions()
 	// 规范判定审计：异步写 PG（hash chain），不阻塞判定路径。
 	installPolicyAuditor(ctx, m.pg)
@@ -664,6 +667,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/policy/status", s.pgPolicyStatus)
 	mux.HandleFunc("GET /api/policy/decisions", s.pgPolicyDecisions)
 	mux.HandleFunc("GET /api/policy/chain", s.pgPolicyChain)
+	mux.HandleFunc("GET /api/policy/holds", s.pgPolicyHolds)
+	mux.HandleFunc("POST /api/policy/holds/{id}/answer", s.pgPolicyAnswerHold)
 
 	mux.HandleFunc("GET /api/health", s.health)
 	mux.HandleFunc("GET /api/stats", s.stats)

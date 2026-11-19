@@ -8,10 +8,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Autumn-27/norma/llm"
 	"github.com/br0ny4/artex-redev/agent"
 	"github.com/br0ny4/artex-redev/db"
 	"github.com/br0ny4/artex-redev/intercept"
-	"github.com/Autumn-27/norma/llm"
 )
 
 // Opt-in model regression: sends synthetic review inputs only, never executes

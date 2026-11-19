@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	actool "github.com/Autumn-27/norma/tool"
 	"github.com/br0ny4/artex-redev/agent"
 	pgdb "github.com/br0ny4/artex-redev/db"
 	"github.com/br0ny4/artex-redev/enrich"
@@ -21,7 +22,6 @@ import (
 	"github.com/br0ny4/artex-redev/intercept"
 	"github.com/br0ny4/artex-redev/policy"
 	"github.com/br0ny4/artex-redev/traffic"
-	actool "github.com/Autumn-27/norma/tool"
 )
 
 // Task is one engagement: a description + goal + its own exploration store,

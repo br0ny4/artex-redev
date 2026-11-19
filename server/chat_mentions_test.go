@@ -13,9 +13,9 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/Autumn-27/norma/llm"
 	"github.com/br0ny4/artex-redev/agent"
 	"github.com/br0ny4/artex-redev/db"
-	"github.com/Autumn-27/norma/llm"
 )
 
 func TestChatMentionParsing(t *testing.T) {

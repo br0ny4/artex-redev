@@ -31,6 +31,19 @@ func installPolicyAuditor(ctx context.Context, pg *db.DB) {
 				return
 			case ev := <-ch:
 				wctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				// L5 挂起单独落 policy_holds：它是"全量停止 + 等答复"的载体，
+				// 与普通判定流水账不是一回事（规范 7.3）。
+				if ev.Source == "L5-hold" {
+					if _, err := pg.OpenPolicyHold(wctx, db.PolicyHold{
+						TaskID:       ev.TaskID,
+						EngagementID: ev.EngagementID,
+						EngineHoldID: ev.HoldID,
+						Reason:       ev.Rule,
+						Question:     ev.Question,
+					}); err != nil {
+						log.Printf("[policy] 挂起落库失败（内存挂起仍生效）: %v", err)
+					}
+				}
 				_, err := pg.AppendPolicyDecision(wctx, db.PolicyDecision{
 					TS:           ev.TS,
 					EngagementID: ev.EngagementID,

@@ -42,7 +42,10 @@ type Engine struct {
 	mode           string // hard | warn
 
 	mu    sync.Mutex
-	holds map[string]string // taskKey → 挂起原因
+	holds map[string]string // taskKey → 挂起原因（任务级，供测试/未来按任务挂起）
+
+	holdMu sync.Mutex
+	hold   *HoldInfo // 全局挂起（Stop-All，规范 7.3）
 }
 
 // ErrSpecMismatch 表示 policy.yaml 与部署上下文声明的规范版本不一致。
@@ -133,7 +136,9 @@ func (e *Engine) taskKey(task, host string) BudgetKey {
 // 时间窗 → 凭据复用 → 范围 → 语义分级 → 预算。任何一步失败即返回 deny/hold。
 func (e *Engine) DecideRequest(ctx context.Context, task string, r Request) Decision {
 	d := e.decideRequest(ctx, task, r)
-	if d.Action != ActionAllow {
+	// 只有 deny 在这里记流水账：hold 由 L5 统一记（见 raiseHoldDecision），
+	// STOP_ALL 期间不重复记，避免 agent 重试把审计表刷满。
+	if d.Action == ActionDeny {
 		e.emit(Event{
 			TaskID: task, Source: "L3-request", Host: r.Host, Method: r.Method, Path: r.Path,
 			Class: d.Class, Action: string(d.Action), Rule: d.Rule, Reason: d.Reason,
@@ -144,6 +149,11 @@ func (e *Engine) DecideRequest(ctx context.Context, task string, r Request) Deci
 }
 
 func (e *Engine) decideRequest(ctx context.Context, task string, r Request) Decision {
+	// -1. 已全局挂起：Stop-All，任何新请求都不放行（规范 7.3）。
+	if d := e.stopAllDecision(); d.Action != "" {
+		return d
+	}
+
 	// 0. 没有部署上下文：规范 9.2 —— 只允许被动分析，不得发包。
 	if e.eng == nil {
 		return Decision{Action: ActionDeny, Rule: "R0_no_context",
@@ -170,7 +180,8 @@ func (e *Engine) decideRequest(ctx context.Context, task string, r Request) Deci
 	case ScopeInternal, ScopeMetadata:
 		return Decision{Action: ActionDeny, Rule: "R4_internal_lateral", Reason: reason}
 	case ScopeAmbiguous:
-		return Decision{Action: ActionHold, Rule: "SCOPE_UNCERTAIN", Reason: reason}
+		return e.raiseHoldDecision("SCOPE_UNCERTAIN", reason,
+			"目标归属不明（未列入授权清单/第三方托管/CDN 回源）。是否确认在授权范围内？确认后恢复测试，否则请客户补充授权。", "")
 	default:
 		return Decision{Action: ActionDeny, Rule: "R1_scope", Reason: reason}
 	}
@@ -194,15 +205,17 @@ func (e *Engine) decideRequest(ctx context.Context, task string, r Request) Deci
 				Reason: "资金/权益/公域发布类动作直接红线（规范红线 9、4.2 D）"}
 		}
 	case ClassUnknown:
-		return Decision{Action: ActionHold, Rule: "SEMANTICS_UNCERTAIN", Class: sv.Class, Matched: sv,
-			Reason: "语义判不清，按禁止处理并向本方确认（规范 4.1、7.3）"}
+		return e.raiseHoldDecision("SEMANTICS_UNCERTAIN",
+			"接口语义判不清（按禁止处理）："+r.Method+" "+r.Path,
+			"该接口的业务语义无法归类（可能是新的删除/覆盖写法）。请确认它属于哪一类（A 删除/B 覆盖/C 修改/D 状态/E 新增/F 读取）。", sv.Class)
 	}
 
 	// 5. 预算：总量熔断
 	bk := e.taskKey(task, normalizeHost(r.Host))
 	if ok, used, lim := e.budget.Reserve(bk, "total_requests_per_task", 1); !ok {
-		return Decision{Action: ActionHold, Rule: "BUDGET_EXHAUSTED",
-			Reason: fmt.Sprintf("任务请求总量已达上限 %.0f（已用 %.0f），熔断（规范第三章 1、5.3）", lim, used)}
+		return e.raiseHoldDecision("BUDGET_EXHAUSTED",
+			fmt.Sprintf("任务请求总量已达上限 %.0f（已用 %.0f），熔断（规范第三章 1、5.3）", lim, used),
+			"预算已耗尽。请确认是否放宽本次 engagement 的请求总量上限，或结束本轮测试。", "")
 	}
 	return allow()
 }
@@ -213,7 +226,7 @@ func (e *Engine) decideRequest(ctx context.Context, task string, r Request) Deci
 // "读敏感文件" 与 "命令里的目标越界"。
 func (e *Engine) CheckCommand(task, cmd string, opt CommandOptions) Decision {
 	d := e.checkCommand(task, cmd, opt)
-	if d.Action != ActionAllow {
+	if d.Action == ActionDeny {
 		e.emit(Event{
 			TaskID: task, Source: "L1-command", Action: string(d.Action),
 			Rule: d.Rule, Reason: d.Reason, Path: truncateCmd(cmd),
@@ -233,6 +246,9 @@ func truncateCmd(cmd string) string {
 }
 
 func (e *Engine) checkCommand(task, cmd string, opt CommandOptions) Decision {
+	if d := e.stopAllDecision(); d.Action != "" {
+		return d
+	}
 	denyBinaries := map[string]bool{}
 	for _, b := range e.cfg.Tools.DefaultDenyBinaries {
 		denyBinaries[strings.ToLower(strings.TrimSpace(b))] = true

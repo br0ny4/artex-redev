@@ -112,7 +112,7 @@ func (g *Guard) applyPolicy(ctx context.Context, ev hook.Event, cmd string) (hoo
 		return hook.Result{}, false
 	}
 	dec := eng.CheckCommand(taskIDFromCtx(ctx), cmd, policy.CommandOptions{})
-	if dec.Action != policy.ActionDeny {
+	if dec.Action != policy.ActionDeny && dec.Action != policy.ActionHold {
 		return hook.Result{}, false
 	}
 	if !eng.Enforcing() {

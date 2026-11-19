@@ -14,6 +14,9 @@ export default function SetupPage() {
   const router = useRouter();
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
+  // 初始化口令：服务端启动时随机生成并打印在日志里（或由 ARTEX_SETUP_TOKEN 指定）。
+  // 没有它任何人都能在设密码前抢占实例——这是公网裸奔控制台的主要成因。
+  const [setupToken, setSetupToken] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [checking, setChecking] = useState(true);
@@ -44,10 +47,14 @@ export default function SetupPage() {
       setError("密码长度至少 8 位");
       return;
     }
+    if (!setupToken.trim()) {
+      setError("请填写服务端启动日志中的初始化口令");
+      return;
+    }
     setLoading(true);
     setError("");
     try {
-      const { token } = await api.initPassword(password);
+      const { token } = await api.initPassword(password, setupToken.trim());
       auth.setToken(token);
       router.replace("/function/tasks");
     } catch (err) {
@@ -92,6 +99,16 @@ export default function SetupPage() {
             </div>
           ) : (
             <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+              <div className="space-y-1.5">
+                <Label htmlFor="setup-token">初始化口令</Label>
+                <Input
+                  id="setup-token"
+                  value={setupToken}
+                  onChange={(e) => setSetupToken(e.target.value)}
+                  placeholder="服务端启动日志 [auth] 行打印的口令"
+                  autoComplete="off"
+                />
+              </div>
               <div className="space-y-1.5">
                 <Label htmlFor="password">新密码</Label>
                 <Input

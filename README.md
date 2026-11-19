@@ -124,6 +124,15 @@ export ARTEX_ENGAGEMENT_FILE=./policy/web-pentest/deployment-context.yaml
 
 查看判定与证据链：`GET /api/policy/status`、`/api/policy/decisions`、`/api/policy/chain`。
 
+**需要人确认时全量停止**（规范 7.3）：范围归属不明 / 接口语义判不清 / 预算耗尽时，平台会挂起整个
+engagement，把问题原样转给操作员；未获明确答复前所有请求与命令都被挡下。
+
+```bash
+curl /api/policy/holds                        # 看当前挂起与问题
+curl -X POST /api/policy/holds/{id}/answer \
+     -d '{"answer":"已确认在授权范围内","resume":true}'   # 明确答复后才恢复
+```
+
 ### 4. 锁定出网（L2，强烈建议）
 
 只靠代理挡不住 `nmap`/裸 TCP。把容器出口收口到唯一代理：

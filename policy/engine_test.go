@@ -51,11 +51,23 @@ func TestDecideRequestOutOfWindow(t *testing.T) {
 
 func TestDecideRequestScope(t *testing.T) {
 	e := newTestEngine(t, testEngagement(t))
-	// 未列入清单 → 归属不明 → 挂起问询（规范 7.3）
-	if d := e.DecideRequest(context.Background(), "t", req("GET", "other.com", "/")); d.Action != ActionHold {
+	// 未列入清单 → 归属不明 → 全局挂起问询（规范 7.3）
+	d := e.DecideRequest(context.Background(), "t", req("GET", "other.com", "/"))
+	if d.Action != ActionHold || d.Rule != "SCOPE_UNCERTAIN" {
 		t.Fatalf("未列入清单应挂起问询，得到 %v(%s)", d.Action, d.Reason)
 	}
-	// 内网 → 直接拒绝（横向预算 0）
+	// 挂起后是 Stop-All：连内网目标也先被"已挂起"挡住，而不是继续判范围
+	if d := e.DecideRequest(context.Background(), "t", req("GET", "10.0.0.5", "/")); d.Rule != "STOP_ALL" {
+		t.Fatalf("挂起期间应为 STOP_ALL，得到 %v(%s)", d.Action, d.Rule)
+	}
+	// 操作员答复后解除，恢复后内网目标按红线拒绝（横向预算 0）
+	h, ok := e.ActiveHold()
+	if !ok {
+		t.Fatal("应处于挂起状态")
+	}
+	if !e.ReleaseGlobalHold(h.ID) {
+		t.Fatal("ReleaseGlobalHold 失败")
+	}
 	if d := e.DecideRequest(context.Background(), "t", req("GET", "10.0.0.5", "/")); d.Action != ActionDeny || d.Rule != "R4_internal_lateral" {
 		t.Fatalf("内网目标必须拒绝，得到 %v(%s)", d.Action, d.Reason)
 	}

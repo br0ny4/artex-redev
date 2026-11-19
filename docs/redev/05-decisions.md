@@ -127,16 +127,18 @@
 | 判定查询/审计链校验 API | ✅ | `server/policy_api.go`（`/api/policy/{status,decisions,chain}`） |
 | DNS 解析缓存（避免每个请求都解析，同时钉住判定 IP） | ✅ | `policy/install.go`（`NetResolver` TTL 缓存） |
 | L2 出网强制（compose `internal` 网络 + 唯一 egress 代理） | ✅ | `deploy/egress-lockdown/` + `ARTEX_GLOBAL_PROXY` |
-| **未做**：`/api/auth/init` 一次性 setup token | ⬜ | 需前端配合 |
-| **未做**：hold 落库 + 审批 UI（`policy_holds` 表已建） | ⬜ | 下一个切片 |
+| 全局挂起（Stop-All）：范围不明/语义判不清/预算耗尽 → 全量停止 | ✅ | `policy/hold.go` + 测试 |
+| 挂起落库与操作员答复 API | ✅ | `db/policy_holds.go`、`server/policy_hold_api.go`（`/api/policy/holds`） |
+| `/api/auth/init` 一次性 setup token（启动日志/环境变量） | ✅ | `server/auth.go`、setup 页 |
+| **未做**：挂起审批的前端页面（当前只有 API） | ⬜ | 下一个切片 |
 | **未做**：合规矩阵端到端用例（当前各层单测已覆盖） | ⬜ | 下一个切片 |
 
 ---
 
 # 下一步（自主执行顺序）
 
-1. **hold 生命周期**：把 `policy_holds` 接进 `intercept_pending` 的审批 UI，实现"全量停止 → 操作员答复 → 恢复"（规范 7.3），现在 hold 只做到"挡住这一条请求"。
-2. **setup token + 前端**：`/setup` 页要求粘贴启动日志里的一次性 token（未认证抢占的根治）。
+1. **挂起/判定的前端页面**：`/system/policy` 页面（挂起队列 + 一键答复恢复 + 判定流水 + 审计链校验），现在只有 API。
+2. **挂起时暂停任务**：当前挂起会挡住所有请求/命令（Stop-All 语义已达成），但不会主动暂停正在跑的 agent 轮次；下一步在挂起时调用 engine.Pause，省掉空转 token。
 3. **策略 API 前端页**：判定审计列表 + 审计链校验按钮，作为"证据链完整"的可视化凭证。
 4. **合规矩阵端到端**：把 04 §8 的用例扩成端到端（起代理 → 发请求 → 断言 403/截断/挂起）。
 5. **L2 之外**：非 compose 部署的 netns 脚本化（`deploy/egress-lockdown/README.md` 已给模板）。

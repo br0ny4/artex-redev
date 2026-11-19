@@ -2,6 +2,8 @@ package server
 
 import (
 	"crypto/rand"
+	"crypto/subtle"
+	"encoding/hex"
 	"fmt"
 	"log"
 	"math/big"
@@ -152,7 +154,7 @@ func (s *Server) authStatus(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 503, errDataSourceUnavailable)
 		return
 	}
-	writeJSON(w, 200, map[string]any{"initialized": hash != ""})
+	writeJSON(w, 200, map[string]any{"initialized": hash != "", "setup_token_required": true})
 }
 
 // POST /api/auth/init — sets the password for the first time; rejected if already set.
@@ -171,10 +173,26 @@ func (s *Server) authInit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		Password string `json:"password"`
+		Password   string `json:"password"`
+		SetupToken string `json:"setup_token"`
 	}
 	if err := decode(r, &req); err != nil || req.Password == "" {
 		writeErr(w, 400, "密码不能为空")
+		return
+	}
+	// 未认证抢占是公网实例最常见的失陷路径：初始化必须带启动日志里的口令。
+	// 口令随进程生成（或用 ARTEX_SETUP_TOKEN 覆盖），不落库、不进前端包。
+	ip := clientIP(r)
+	if s.login != nil {
+		if ok, retry := s.login.check("setup:" + ip); !ok {
+			w.Header().Set("Retry-After", strconv.Itoa(int(retry.Seconds())+1))
+			writeErr(w, http.StatusTooManyRequests, "初始化尝试过于频繁，请稍后再试")
+			return
+		}
+	}
+	if !setupTokenEqual(req.SetupToken, s.setupToken) {
+		s.loginFail("setup:" + ip)
+		writeErr(w, 403, "初始化口令不正确（见服务端启动日志 [auth] 行，或设置 ARTEX_SETUP_TOKEN）")
 		return
 	}
 	if msg := validatePassword(req.Password); msg != "" {
@@ -318,4 +336,26 @@ func (s *Server) loginFail(ip string) {
 	if s.login != nil {
 		s.login.fail(ip)
 	}
+}
+
+// setupTokenEqual 常数时间比较，避免通过时间差逐字节猜口令。
+func setupTokenEqual(got, want string) bool {
+	if want == "" || got == "" || len(got) != len(want) {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(got), []byte(want)) == 1
+}
+
+// loadOrCreateSetupToken 返回初始化口令：优先环境变量，否则每次启动随机生成。
+// 生成的口令只出现在启动日志里——这是"能看到服务日志 = 有资格初始化"的最小信任模型。
+func loadOrCreateSetupToken() string {
+	if v := strings.TrimSpace(os.Getenv("ARTEX_SETUP_TOKEN")); v != "" {
+		return v
+	}
+	buf := make([]byte, 16)
+	if _, err := rand.Read(buf); err != nil {
+		// 随机数不可用是致命环境问题，退化为固定串只会更危险；直接 panic 让部署者发现。
+		panic("auth: crypto/rand 不可用: " + err.Error())
+	}
+	return hex.EncodeToString(buf)
 }

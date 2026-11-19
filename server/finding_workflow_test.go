@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
+	actool "github.com/Autumn-27/norma/tool"
 	"github.com/br0ny4/artex-redev/agent"
 	"github.com/br0ny4/artex-redev/db"
-	actool "github.com/Autumn-27/norma/tool"
 )
 
 func workflowCall(t *testing.T, ctx context.Context, tool actool.CoreTool, input any, wantError bool) string {

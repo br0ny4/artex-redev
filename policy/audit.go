@@ -18,6 +18,8 @@ type Event struct {
 	Class        string
 	Action       string // deny | hold | warn
 	Rule         string
+	HoldID       int64  // 仅 L5-hold：对应 engine 全局挂起的 id
+	Question     string // 仅 L5-hold：要转述给操作员的问题
 	Reason       string
 	Budget       map[string]float64
 }
