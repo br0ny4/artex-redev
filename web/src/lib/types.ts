@@ -1686,6 +1686,8 @@ export interface PolicyStatus {
   enforcing?: boolean;
   spec_version?: string;
   handshake?: string;
+  /** 当前使用的域包（web-pentest / binary-re …）。 */
+  pack?: string;
   engagement?: PolicyEngagement;
 }
 

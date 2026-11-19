@@ -12,6 +12,9 @@
   一套策略、实际跑另一套）。域包可声明部署上下文的必填项（`engagement_requirements`）。
   `policy/embed.go` 的 `PackConfig`/`PackLexicon`/`AvailablePacks`，设计说明见
   [`docs/redev/07-domain-packs.md`](docs/redev/07-domain-packs.md)。
+- **仪表盘规范执行状态**：总览页顶部在全量停止时显示红色横幅（原因 + 原问题 + 去答复入口，
+  优先于一切统计），系统状态卡新增"规范执行"（是否启用 / 当前域包 / 是否全量停止）与
+  "近 100 条判定"（拦截数 + 未结挂起数）。值班时不用先翻日志才知道平台在拦什么。
 - **binary-re 离线域包**：样本/固件/恶意代码分析的首个离线包——出网只允许情报回源
   （VirusTotal/MalwareBazaar/OTX + 上下文声明地址），`wine`/`qemu` 等能在宿主机跑样本的工具
   默认禁用，情报查询 200 次/任务、1 rps、响应体 50MB 截断；红线新增 `R12_sample_upload`、

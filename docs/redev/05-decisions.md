@@ -136,6 +136,7 @@
 | 域包抽象：`engagement.pack` 选包、未知包报错、`ARTEX_POLICY_PACK` 覆盖、状态展示 pack | ✅ | `policy/embed.go`、`policy/packs_test.go` |
 | binary-re 离线域包：情报回源白名单、禁宿主模拟器、送检审授权、R12/R13 红线 | ✅ | `policy/binary-re/` + 测试（[07](07-domain-packs.md)） |
 | 域包级部署上下文必填项（`engagement_requirements`，离线域不要求测试账号） | ✅ | `policy/config.go` |
+| 策略状态进仪表盘：顶部停止横幅、规范执行（pack/状态）、近 100 条判定拦截数 | ✅ | `web/src/app/(main)/dashboard/page.tsx` |
 | **未做**：合规矩阵端到端用例（当前各层单测已覆盖） | ⬜ | 下一个切片 |
 
 ---
@@ -143,7 +144,7 @@
 # 下一步（自主执行顺序）
 
 1. **其余离线域包**：`malware_triage`（capa/YARA/FLOSS）、`source_audit`（Semgrep CE/Joern）——`binary_re` 已跑通，按 07 文档"新增包五步"复制。
-2. **策略状态进仪表盘**：把挂起数、拦截数、预算余量、当前域包做成首页指标，蓝队值班时一眼看出平台在拦什么、用哪套策略（避免带着未生效策略去测）。
+2. **预算余量进仪表盘**：挂起数/拦截数/当前域包已上首页；预算余量与域包级指标（情报查询余量）仍缺。
 3. **合规矩阵端到端**：把 04 §8 的用例扩成端到端（起代理 → 发请求 → 断言 403/截断/挂起）。
 4. **L2 之外**：非 compose 部署的 netns 脚本化（`deploy/egress-lockdown/README.md` 已给模板）。
 5. **发布**：v0.2.0 镜像（GHCR 多架构）拉取验证通过后，把本切片作为 v0.3.0 发布；release notes 直接取 CHANGELOG。

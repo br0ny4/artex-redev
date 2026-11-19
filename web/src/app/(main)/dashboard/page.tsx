@@ -30,6 +30,10 @@ import type {
   InterceptPending,
   LLMProfile,
   MCPServer,
+  PolicyDecision,
+  PolicyEngineHold,
+  PolicyHold,
+  PolicyStatus,
   Settings,
   SkillItem,
   Stats,
@@ -67,6 +71,22 @@ function fmtTokens(n: number): string {
   if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + "M";
   if (n >= 1000) return (n / 1000).toFixed(1) + "k";
   return String(n);
+}
+
+/** 全量停止的原因码 → 人话（与 /system/policy 页面保持一致）。 */
+function policyReasonLabel(reason: string): string {
+  switch (reason) {
+    case "SCOPE_UNCERTAIN":
+      return "目标归属不明";
+    case "SEMANTICS_UNCERTAIN":
+      return "接口语义判不清";
+    case "BUDGET_EXHAUSTED":
+      return "预算耗尽";
+    case "WINDOW_CLOSED":
+      return "授权窗口已过";
+    default:
+      return reason;
+  }
 }
 
 const ASSET_TYPE_LABELS: Record<string, string> = {
@@ -147,6 +167,11 @@ export default function DashboardPage() {
   const [skills, setSkills] = React.useState<SkillItem[]>([]);
   const [tools, setTools] = React.useState<Tool[]>([]);
   const [llmProfiles, setLLMProfiles] = React.useState<LLMProfile[]>([]);
+  // 规范执行层：值班时要一眼看出"现在有没有在拦、是不是已全量停止"。
+  const [policy, setPolicy] = React.useState<PolicyStatus | null>(null);
+  const [policyHolds, setPolicyHolds] = React.useState<PolicyHold[]>([]);
+  const [engineHold, setEngineHold] = React.useState<PolicyEngineHold | null>(null);
+  const [policyDecisions, setPolicyDecisions] = React.useState<PolicyDecision[]>([]);
 
   // The task list is the most expensive dashboard source. Poll it independently
   // so a large history cannot hold back every other dashboard panel.
@@ -187,14 +212,21 @@ export default function DashboardPage() {
       if (loading) return;
       loading = true;
       try {
-        const [findings, stats, settings, pending, activity, tokens, conversationTokens] = await Promise.all([
-          api.findings(),
-          api.stats(),
-          api.settings(),
-          api.interceptPending(),
-          api.activity(undefined, { limit: 30 }),
-          api.tokenStats(),
-          api.conversationTokens(),
+        const [findings, stats, settings, pending, activity, tokens, conversationTokens, policyStatus] =
+          await Promise.all([
+            api.findings(),
+            api.stats(),
+            api.settings(),
+            api.interceptPending(),
+            api.activity(undefined, { limit: 30 }),
+            api.tokenStats(),
+            api.conversationTokens(),
+            api.policyStatus(),
+          ]);
+        // 判定流水与挂起是"值班面板"数据：慢一点没关系，失败也不能拖垮其它卡片。
+        const [policyHoldData, decisions] = await Promise.all([
+          api.policyHolds(false, 50).catch(() => ({ holds: [] as PolicyHold[], engine_hold: undefined })),
+          api.policyDecisions(100).catch(() => [] as PolicyDecision[]),
         ]);
         if (!alive) return;
         setFindings(findings);
@@ -204,6 +236,10 @@ export default function DashboardPage() {
         setActivity(activity.items);
         setTokens(tokens.total ?? null);
         setConvTokens(conversationTokens);
+        setPolicy(policyStatus);
+        setPolicyHolds(policyHoldData.holds ?? []);
+        setEngineHold(policyHoldData.engine_hold ?? null);
+        setPolicyDecisions(decisions);
       } catch {
         // Preserve stale data and retry on the next interval.
       } finally {
@@ -489,6 +525,10 @@ export default function DashboardPage() {
     return "bg-blue-500/10 text-blue-400 border-blue-500/20";
   }
 
+  // 判定挡下的请求条数（近 100 条流水）——蓝队值班看"平台在拦什么"的入口。
+  const blockedRecent = policyDecisions.filter((d) => d.action !== "allow").length;
+  const openHolds = policyHolds.filter((h) => h.status !== "resumed").length;
+
   // ── render ────────────────────────────────────────────────────────────────
 
   return (
@@ -500,6 +540,28 @@ export default function DashboardPage() {
           <p className="text-xs text-muted-foreground">系统全局状态 · 实时刷新</p>
         </div>
       </div>
+
+      {/* ── 全量停止横幅：优先于一切统计，停止时先把人叫过来 ── */}
+      {policy?.enabled && engineHold && (
+        <Link
+          href="/system/policy"
+          className="flex items-start justify-between gap-3 rounded-lg border border-red-500/40 bg-red-500/10 px-4 py-3 hover:bg-red-500/15"
+        >
+          <div className="min-w-0">
+            <div className="flex items-center gap-1.5 text-xs font-semibold text-red-400">
+              <ShieldCheckIcon className="size-3.5" />
+              规范执行层已全量停止 · {policyReasonLabel(engineHold.reason)}
+            </div>
+            <div className="mt-1 line-clamp-2 text-[11px] text-red-200/80">{engineHold.question}</div>
+            <div className="mt-1 text-[10px] text-muted-foreground">
+              所有请求与命令已被挡下，任务已暂停；回答后才会恢复
+            </div>
+          </div>
+          <span className="flex shrink-0 items-center gap-0.5 text-[10px] text-red-300">
+            去答复 <ArrowUpRightIcon className="size-3" />
+          </span>
+        </Link>
+      )}
 
       {/* ── Row 1: 5 stat cards ── */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
@@ -1130,6 +1192,45 @@ export default function DashboardPage() {
           <SectionTitle icon={ShieldCheckIcon}>系统状态</SectionTitle>
 
           <div className="flex flex-col gap-2">
+            <Link
+              href="/system/policy"
+              className="flex items-center justify-between rounded-lg border bg-muted/20 px-3 py-2 hover:bg-muted/40"
+            >
+              <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+                规范执行
+                {policy?.pack && <span className="rounded bg-muted px-1 font-mono text-[9px]">{policy.pack}</span>}
+              </div>
+              <Badge
+                variant="outline"
+                className={cn(
+                  "text-[10px]",
+                  !policy?.enabled
+                    ? "text-muted-foreground"
+                    : engineHold
+                      ? "border-red-500/30 bg-red-500/10 text-red-400"
+                      : "border-emerald-500/30 bg-emerald-500/10 text-emerald-400",
+                )}
+              >
+                {!policy?.enabled ? "未启用" : engineHold ? "已全量停止" : "运行中"}
+              </Badge>
+            </Link>
+
+            <Link
+              href="/system/policy"
+              className="flex items-center justify-between rounded-lg border bg-muted/20 px-3 py-2 hover:bg-muted/40"
+            >
+              <div className="text-[10px] text-muted-foreground">近 100 条判定</div>
+              <span
+                className={cn(
+                  "text-[10px] tabular-nums",
+                  blockedRecent > 0 ? "text-amber-400" : "text-muted-foreground",
+                )}
+              >
+                拦截 {blockedRecent} / {policyDecisions.length}
+                {openHolds > 0 && <span className="ml-1 text-red-400">· 挂起 {openHolds}</span>}
+              </span>
+            </Link>
+
             <div className="flex items-center justify-between rounded-lg border bg-muted/20 px-3 py-2">
               <div className="text-[10px] text-muted-foreground">LLM 配置</div>
               <Badge
