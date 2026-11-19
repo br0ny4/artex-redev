@@ -1,0 +1,35 @@
+# L2 出网强制 override：artex/postgres 只在 internal 网络（无外网），
+# 唯一出口是 egress 代理容器。用法与验收见同目录 README.md。
+#
+#   docker compose -f docker-compose.yml -f deploy/egress-lockdown/docker-compose.egress.yml up -d
+
+services:
+  postgres:
+    networks:
+      - internal
+
+  artex:
+    networks:
+      - internal
+    environment:
+      # 录制代理的上游出口（L3 判定通过后由它转发）。DB 里配置了 global_proxy 时以 DB 为准。
+      ARTEX_GLOBAL_PROXY: ${ARTEX_GLOBAL_PROXY:-http://egress:3128}
+      # LLM 调用也走唯一出口，否则 internal 网络下 LLM 直接不可达。
+      ARTEX_LLM_PROXY: ${ARTEX_LLM_PROXY:-http://egress:3128}
+
+  # 唯一有外网的容器。只做转发，不做判定（判定在 artex 的 L3/guard 上）。
+  egress:
+    image: ubuntu/squid:latest
+    networks:
+      - internal
+      - egress
+    restart: unless-stopped
+    # 生产环境请加出站白名单（只放行目标与 LLM 厂商域名），
+    # 否则它就是一个开放代理。示例见同目录 squid-allowlist.conf。
+
+networks:
+  # internal: true → 该网络上的容器没有默认路由，无法直连互联网。
+  internal:
+    internal: true
+  # 只有 egress 容器同时挂这个网络，才有真正的外网出口。
+  egress: {}
