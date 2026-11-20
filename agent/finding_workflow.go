@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/br0ny4/artex-redev/db"
 	actool "github.com/Autumn-27/norma/tool"
+	"github.com/br0ny4/artex-redev/db"
 )
 
 const findingIDGuidance = "\n\n**漏洞编号约定**：finding_id 是独立漏洞记录 ID；finding_node_id 是探索节点 ID。list_findings / list_task_findings / node_detail / get_task_node_detail 的 id 保留为探索节点 ID，应从同一返回的 finding_id 读取独立编号。get_finding_traffic / bind_finding_traffic 用独立 finding_id。旧 update_finding_report 的 finding_id 参数仍传 finding_node_id。不要把 report_finding 第一行的数字用于证据工具，也不要遇到编号错误后猜测其他数字。"
@@ -64,6 +64,12 @@ func findingWorkflowTools(agentKey string, tools []actool.CoreTool) ([]actool.Co
 		}
 	}
 	guidance := ""
+	if has["report_finding"] {
+		guidance += "\n\n**0day 准入（导出前强制）**：report_finding 只是登记候选，不等于可交付结论。" +
+			"提交前该 finding 必须有 ≥5 条**反例**（阴性对照：换变体输入/降级条件/对照环境，漏洞必须不出现）和 ≥3 次覆盖 ≥2 类信息源（CVE 库、厂商公告、代码托管、漏洞库）的**撞车比对**（查是否已被公开）。" +
+			"因此上报时请在 evidence 里同时写清：每条反例的 claim（排除哪条误报路径）、method（怎么验的）、expected（正常应观察到什么）、observed（实际观察到什么）；以及撞车检索用的关键词、来源类别、是否命中同类漏洞。" +
+			"这些记录由操作员在准入接口登记；未过门的 finding 导出报告会被 409 拦下。不要声称做过未真正执行的验证。"
+	}
 	if has["report_finding"] || has["add_task_hint"] || has["add_hint"] {
 		guidance = "\n\n**流量证据交接（可选）**：自动绑定默认由报告 Agent 在漏洞入库后、编写报告前完成。上报者应在 evidence 保留验证命令、关键输出、已有真实流量 ID 及其用途，任务中带 intent_id，便于报告 Agent 追溯；不必为了绑定额外查包。Auto / Planner 代为上报时不要丢弃执行者已有的引用。add_hint / add_task_hint 可用 traffic_refs 交接；显式即时绑定仍兼容 report_finding 的 traffic_refs / evidence_hint_id。TCP 或无包时正常登记，不能猜测 ID，也不能仅为补包重复探测。"
 		if has["add_task_hint"] && !has["add_hint"] {
