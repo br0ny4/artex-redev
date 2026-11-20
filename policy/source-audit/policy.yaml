@@ -23,6 +23,10 @@ spec:
 engagement_requirements:
   test_accounts: false               # 源码审计不碰目标账号体系
 
+
+# 运行时要求：源码审计域：纯本地只读分析、默认零出网，不需要录制代理。
+runtime:
+  requires_traffic_capture: false
 enforcement:
   mode: hard
   layers:

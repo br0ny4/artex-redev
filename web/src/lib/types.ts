@@ -1688,6 +1688,8 @@ export interface PolicyStatus {
   handshake?: string;
   /** 当前使用的域包（web-pentest / binary-re …）。 */
   pack?: string;
+  /** 是否必须有录制代理：在线域 true（L3 判定在代理里）；离线域 false（可免代理启动）。 */
+  traffic_capture_required?: boolean;
   engagement?: PolicyEngagement;
 }
 

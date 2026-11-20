@@ -48,6 +48,19 @@ type Engine struct {
 	hold   *HoldInfo // 全局挂起（Stop-All，规范 7.3）
 }
 
+// RequiresTrafficCapture 报告当前域包是否必须有录制代理才能启动。
+// 未启用引擎（cfg 为 nil）时返回 false：没有判定要跑，也就没有代理依赖。
+// 域包未声明时按在线域处理（true），避免漏写把强制录制放松。
+func (e *Engine) RequiresTrafficCapture() bool {
+	if e == nil || e.cfg == nil {
+		return false
+	}
+	if e.cfg.Runtime.RequiresTrafficCapture != nil {
+		return *e.cfg.Runtime.RequiresTrafficCapture
+	}
+	return true
+}
+
 // ErrSpecMismatch 表示 policy.yaml 与部署上下文声明的规范版本不一致。
 var ErrSpecMismatch = errors.New("规范版本不一致")
 

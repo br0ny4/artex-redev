@@ -161,7 +161,20 @@
 | L3 出口端到端：真实代理拦截（403 + X-ArtEx-Policy + 落索引，未发包） | ✅ | `traffic/policy_e2e_test.go` |
 | 门二机器证据：平台代执行检索（NVD + CISA KEV，命中条目落库 origin=platform，同一漏洞判定仍人工） | ✅ | `novelty/`、`server/finding_novelty_probe.go` |
 | 门三机器证据：平台代执行重放（经录制代理发包、机器判定、复现次数按实测抬高、回填真实流量 id；仅 http） | ✅ | `vulngate/replay.go`、`server/finding_poc_replay.go` |
+| 离线域免录制代理启动：域包 `runtime.requires_traffic_capture`（在线域仍 fail-closed，离线域录制可关） | ✅ | `policy/engine.go`、`server/manager.go`、`server/policy_offline_pack_test.go` |
 | **未做**：合规矩阵其余端到端（响应截断/预算/挂起全链路） | ⬜ | 下一个切片 |
+
+---
+
+## D10 · 离线域包免录制代理启动（2026-11-20）
+
+- **决定**：域包用 `runtime.requires_traffic_capture` 声明是否需要录制代理；`web-pentest` 为
+  `true`（fail-closed），`binary-re` / `source-audit` / `malware-triage` 为 `false`（免代理、录制可关）。
+  未声明按在线域（最严）处理。
+- **理由**：强制录制对离线域是"合规反噬分析能力"——样本/源码分析被迫先配 MITM 证书与代理环境，
+  而它根本没有目标侧流量；L3 判定在线域不可放弃，所以按域包区分而不是全局放松。
+- **代价**：离线域没有代理内的 L3 出口判定，边界要靠命令侧判定 + `local_paths` 清单 + L2 出网白名单。
+- **复盘条件**：出现"离线域仍需按请求粒度审计外发"的需求时，应补命令/文件侧证据链，而不是重新强制代理。
 
 ---
 

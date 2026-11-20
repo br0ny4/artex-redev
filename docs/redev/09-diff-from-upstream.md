@@ -31,6 +31,7 @@
 | 登录 | 无限速 | 同 IP 10 分钟 5 次失败锁 15 分钟（429 + Retry-After；`ARTEX_TRUST_PROXY=1` 才信 XFF） | 弱口令爆破 |
 | 规范执行层未配置时 | — | 行为与上游一致（不装引擎=不拦） | 不替使用者做决定，但一旦配置即 fail-closed |
 | 规范执行层已配置时 | — | 失败即拒绝：录制代理不可用→**拒绝启动**；流量录制**不可关闭** | L3 判定依赖录制代理，关掉即绕过；D7 决策"安装即 hard" |
+| 离线域包运行时 | 无域包概念，一律当在线域 | 声明 `runtime.requires_traffic_capture: false` 的包（binary-re/source-audit/malware-triage）**免代理启动、录制可关**；在线域仍 fail-closed | 强制录制对离线分析是合规反噬：本地产物没有目标侧流量，不该先被迫配 MITM 证书 |
 
 ## 2. 合规执行层：从"提示词"到"工程强制"
 
@@ -108,7 +109,7 @@ Go 文件 354 → 369
 新增 HTTP 端点 12 个：policy holds ×2（列表/答复）、mcp presets、finding gate ×9
 （门状态查询、反例增删、撞车记录增删、撞车平台代检、PoC 写入/删除、PoC 平台重放）
 （status/decisions/chain 三个端点发布快照时已有）
-新增测试函数 58 个（policy 包 51 个；vulngate 17 个；novelty 5 个；docscheck 1 个）
+新增测试函数 60 个（policy 包 53 个；vulngate 17 个；novelty 6 个；docscheck 1 个；其余在 server/db/traffic）
 ```
 
 ## 8. 没有改的部分（避免误读为"全重写"）

@@ -36,6 +36,12 @@
 - **漏洞详情新增「准入」页**：三道门的完成度、还差什么的逐条原因，以及 PoC / 反例 / 撞车检索的
   录入与撤回表单——操作员不用再靠 curl 登记；判定仍是服务端强制，前端只负责录入与展示。
 
+- **离线域包免录制代理启动**：域包用 `runtime.requires_traffic_capture` 声明是否需要录制代理。
+  `web-pentest` 仍 fail-closed（没有代理拒绝启动、启用后录制不可关闭）；`binary-re` /
+  `source-audit` / `malware-triage` 可免代理启动、录制可关——离线分析不该先被迫配 MITM 证书
+  与代理环境。漏写 `runtime` 按在线域（最严）处理。`GET /api/policy/status` 新增
+  `traffic_capture_required`，`/system/policy` 显示"强制开启/可关闭"。
+
 ### 测试
 
 - **0day 准入端到端**：反例不足挡、5 条副本挡、撞车挡（带编号）、缺 PoC 挡、只复现 1 次挡、

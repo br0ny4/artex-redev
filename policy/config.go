@@ -27,6 +27,9 @@ type Config struct {
 	Report      ReportConfig      `yaml:"report"`
 	Compliance  ComplianceConfig  `yaml:"compliance"`
 
+	// Runtime 声明该域包对运行时环境的要求（见 RuntimeConfig）。
+	Runtime RuntimeConfig `yaml:"runtime"`
+
 	// Requirements 声明该域包对部署上下文的必填项。在线测试域要求测试账号兜住
 	// C/D/E 类操作；离线分析域不碰目标账号体系，强填只会逼使用者造假账号。
 	Requirements EngagementRequirements `yaml:"engagement_requirements"`
@@ -34,6 +37,17 @@ type Config struct {
 	// Pack 是策略来源的域包名（web-pentest / binary-re ...），由 PackConfig 填入，
 	// 不参与 yaml 解码；用于状态展示与审计标注"这批判定用的是哪套域策略"。
 	Pack string `yaml:"-"`
+}
+
+// RuntimeConfig 声明域包对运行时的要求。目前只有一项：是否必须有录制代理。
+//
+// 在线测试域必须有：L3（范围/语义/预算）判定就发生在代理里，没有代理等于判定被绕过。
+// 离线分析域不必须：目标是本地产物，不产生"打到目标"的 HTTP 流量；情报回源由 L2 出网
+// 白名单兜住，硬塞一个用不上的 MITM 代理只会让离线分析必须先配好证书与代理环境。
+//
+// 用指针表达"未声明"：nil 按在线域（最严）处理——漏写不该把强制录制放松。
+type RuntimeConfig struct {
+	RequiresTrafficCapture *bool `yaml:"requires_traffic_capture" json:"requires_traffic_capture,omitempty"`
 }
 
 // EngagementRequirements 是"部署上下文填什么才算完整"的域包声明。

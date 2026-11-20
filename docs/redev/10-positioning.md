@@ -52,7 +52,8 @@ ARTEX 被大规模滥用（FBI FLASH 通报、1400+ 无鉴权控制台）恰好�
 | 全量停止幂等，审计只发一次（不刷表） | `policy/hold.go` | `policy TestHoldEmitsAuditOnce` |
 | 全量停止暂停任务、答复恢复后续跑（省 token，不空转） | `server/policy_hold_pause.go` | `server TestPolicyHoldPausesAndResumesTasks` |
 | 范围/语义判定在**发包前**（L3 代理出口） | `traffic/policy.go` | `traffic TestL3ProxyBlocksOutOfScopeBeforeSending` |
-| 启用策略后流量录制**不可关闭**、无代理拒绝启动 | `server/manager.go:488` | `server TestManagerRefusesDisablingCaptureUnderPolicy` |
+| 在线域：策略启用后录制**不可关闭**、无代理拒绝启动 | `server/manager.go:488` | `server TestManagerRefusesDisablingCaptureUnderPolicy` |
+| 离线域：域包声明 `runtime.requires_traffic_capture: false` 后**可免代理启动**、录制可关 | `policy/engine.go` | `server TestManagerStartsWithOfflinePackWithoutProxy` |
 | 初始化入口要口令（未认证不可抢占） | `server/auth.go` | `server TestAuthInitRequiresSetupToken` |
 | 随仓库发布的部署模板必须真的能装进引擎 | `policy/config.go` | `policy TestLoadEngagementAcceptsShippedTemplate` |
 
@@ -77,7 +78,9 @@ ARTEX 被大规模滥用（FBI FLASH 通报、1400+ 无鉴权控制台）恰好�
 1. **fail-closed 可能把探索切碎**：判不清就全量停，多次模糊请求会长时间停摆。
    缓解：域包调参 + 操作台答复闭环 + 挂起即暂停任务（避免空烧 token）。现状：已实现，仍需实战调参。
 2. **强制录制让离线域也必须带代理**：这是"在线域合规"对"离线分析"的反噬。
-   缓解：规划离线域无代理启动路径（录制可关、判定改走命令/文件侧）。现状：**未完成，已知缺口**。
+   缓解：域包声明 `runtime.requires_traffic_capture`，离线域免代理启动、录制可关；
+   在线域仍 fail-closed。现状：**已实现**（见 [`07-domain-packs.md`](07-domain-packs.md) §2.1），
+   剩余打磨是离线域的证据供给走命令侧审计。
 3. **门只在导出出口**：探索与候选生成阶段仍可能做无证据断言。
    缓解：门二/门三已机器化；剩余是探索期提示与阶段产物固化。现状：进行中。
 4. **（成本）上游已闭源，没有上游可合**：骨架行为靠本仓库自己维护。

@@ -172,3 +172,51 @@ func TestInstallFromFileSelectsPack(t *testing.T) {
 		t.Fatalf("未声明地址不应放行，得到 %v(%s)", d.Action, d.Reason)
 	}
 }
+
+// 录制代理是运行时资源，不同域包的依赖不同：在线域的 L3 判定发生在代理里，
+// 离线域只分析本地产物。这条测试守住"默认在线域必须强制录制"，同时保证离线域
+// 不会被迫挂一个用不上的 MITM 代理（否则样本/源码分析先得配代理证书）。
+func TestPackRuntimeCaptureRequirement(t *testing.T) {
+	cases := map[string]bool{
+		"web-pentest":    true,
+		"binary-re":      false,
+		"source-audit":   false,
+		"malware-triage": false,
+	}
+	for pack, want := range cases {
+		cfg, err := PackConfig(pack)
+		if err != nil {
+			t.Fatalf("加载 %s: %v", pack, err)
+		}
+		if cfg.Runtime.RequiresTrafficCapture == nil {
+			t.Fatalf("%s 必须显式声明 runtime.requires_traffic_capture（漏写会按在线域最严处理：%v）", pack, want)
+		}
+		if got := *cfg.Runtime.RequiresTrafficCapture; got != want {
+			t.Fatalf("%s 的 requires_traffic_capture=%v，want %v", pack, got, want)
+		}
+		eng, err := New(cfg, nil, nil, NewNetResolver(time.Minute))
+		if err != nil {
+			t.Fatalf("构造 %s 引擎: %v", pack, err)
+		}
+		if got := eng.RequiresTrafficCapture(); got != want {
+			t.Fatalf("%s 的 Engine.RequiresTrafficCapture()=%v，want %v", pack, got, want)
+		}
+	}
+}
+
+// 未声明的域包必须按最严处理：漏写 runtime 不该把强制录制放松。
+func TestEngineDefaultsToRequiringCapture(t *testing.T) {
+	cfg := &Config{}
+	cfg.Pack = "synthetic"
+	eng, err := New(cfg, nil, nil, NewNetResolver(time.Minute))
+	if err != nil {
+		t.Fatalf("构造引擎: %v", err)
+	}
+	if !eng.RequiresTrafficCapture() {
+		t.Fatal("未声明 runtime.requires_traffic_capture 时应按在线域处理（要求录制代理）")
+	}
+	var nilEng *Engine
+	if nilEng.RequiresTrafficCapture() {
+		t.Fatal("未启用引擎时不应要求录制代理")
+	}
+}

@@ -259,6 +259,18 @@ export default function PolicyPage() {
                 }
               />
               <Field label="范围内域名" value={String(status.engagement?.scope?.domains?.length ?? 0) + " 个"} />
+              <Field
+                label="流量录制"
+                value={
+                  status.pack
+                    ? status.traffic_capture_required
+                      ? `强制开启（${status.pack} 在线域：L3 判定在代理里）`
+                      : `可关闭（${status.pack} 离线域：分析本地产物）`
+                    : status.traffic_capture_required
+                      ? "强制开启"
+                      : "可关闭"
+                }
+              />
               <Field label="握手令牌" value={status.handshake || "—"} mono />
               <Field
                 label="判定记录"

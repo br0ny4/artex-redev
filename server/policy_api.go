@@ -95,6 +95,8 @@ func (s *Server) pgPolicyStatus(w http.ResponseWriter, r *http.Request) {
 		"spec_version": eng.SpecVersion(),
 		"handshake":    eng.HandshakeToken(),
 		"pack":         eng.Pack(),
+		// 离线域包=False：不强制录制代理（详见 docs/redev/07-domain-packs.md）。
+		"traffic_capture_required": eng.RequiresTrafficCapture(),
 	}
 	if e := eng.Engagement(); e != nil {
 		resp["engagement"] = map[string]any{

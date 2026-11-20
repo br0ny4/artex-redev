@@ -187,6 +187,8 @@ export ARTEX_ENGAGEMENT_FILE=./policy/binary-re/deployment-context.yaml
 与在线域的差异：出网只允许情报回源（其余全禁）；`wine`/`qemu` 等能在宿主机跑样本的工具默认禁用；
 情报查询 200 次/任务、1 rps；送检（upload/submit/detonate）归 D 类需显式授权，未声明即拒绝。
 `GET /api/policy/status` 的 `pack` 字段与 `/system/policy` 页面会显示当前用的是哪套域策略。
+离线域包不需要录制代理即可启动（在线域没有代理直接拒绝启动）：录制默认关、可随时开，
+`GET /api/policy/status` 的 `traffic_capture_required` 会说明当前域包的要求。
 
 目前**没有**硬判定谓词的两件事（文档里也写明了，别当保证）：直接在宿主机执行样本、经脚本/编码把产物
 外传。前者靠沙箱声明 + L2 出网收口 + guard 审批兜，后者依赖出网白名单阻挡目的地。

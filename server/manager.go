@@ -410,16 +410,19 @@ func NewManager(dir, proxyAddr string) (*Manager, error) {
 	}
 	// 规范执行层启用时，录制代理是 L3 判定的唯一通道：代理没起来就必须拒绝启动，
 	// 否则策略看起来"开了"，实际所有目标流量都绕过判定直连。
-	if policy.Default() != nil && m.traffic == nil {
-		return nil, errors.New("规范执行层已启用但录制代理不可用（-proxy 为空或启动失败）：拒绝启动，否则 L3 范围/语义判定会被绕过")
+	// 例外：离线域包（target 是本地产物，不产生目标侧流量）不要求代理，否则
+	// 样本/源码分析也得先配好 MITM 证书与代理环境——合规反而挡住分析能力。
+	if eng := policy.Default(); eng != nil && eng.RequiresTrafficCapture() && m.traffic == nil {
+		return nil, errors.New("规范执行层已启用但录制代理不可用（-proxy 为空或启动失败）：拒绝启动，否则 L3 范围/语义判定会被绕过；离线域包（如 binary-re）可用 -policy-pack 或 engagement.pack 选择后免代理启动")
 	}
 	// Asset auto-completion engine (§5): HTTP probes routed through the recording
 	// proxy (via m.ProxyAddr, which honors the traffic-capture toggle).
 	m.trafficOn = pg.GetBool(settingTrafficCapture, false)
 	// 规范执行层启用时，录制代理是 L3（范围/语义/预算）判定的必经通道：
 	// 关掉录制 = agent 直连 = 判定被绕过。所以强制打开，并在 SetTrafficEnabled
-	// 里拒绝关闭。未启用策略时行为与上游一致（默认关）。
-	if policy.Default() != nil && !m.trafficOn && m.traffic != nil {
+	// 里拒绝关闭。离线域包只做本地产物分析、没有目标侧流量，不强制开启。
+	// 未启用策略时行为与上游一致（默认关）。
+	if eng := policy.Default(); eng != nil && eng.RequiresTrafficCapture() && !m.trafficOn && m.traffic != nil {
 		m.trafficOn = true
 		if err := pg.SetBool(settingTrafficCapture, true); err != nil {
 			log.Printf("[policy] 强制开启流量录制失败（本次进程内已生效）: %v", err)
@@ -486,8 +489,10 @@ func (m *Manager) TrafficEnabled() bool {
 // SetTrafficEnabled persists and applies the traffic-capture toggle. Callers must
 // rebuild the agents (applyLLM) afterwards so the new proxy/tools/prompt take hold.
 func (m *Manager) SetTrafficEnabled(on bool) error {
-	if !on && policy.Default() != nil {
-		return errors.New("规范执行层已启用：流量录制不可关闭（关闭会让 L3 范围/语义/预算判定失效）")
+	if !on {
+		if eng := policy.Default(); eng != nil && eng.RequiresTrafficCapture() {
+			return errors.New("规范执行层已启用（在线域包）：流量录制不可关闭（关闭会让 L3 范围/语义/预算判定失效）；离线域包可关闭")
+		}
 	}
 	if err := m.pg.SetBool(settingTrafficCapture, on); err != nil {
 		return err

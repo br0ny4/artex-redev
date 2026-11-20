@@ -27,6 +27,11 @@ spec:
 engagement_requirements:
   test_accounts: false
 
+
+# 运行时要求：离线分析域：目标是本地产物，不产生目标侧 HTTP 流量；情报回源由 L2 出网白名单兜住，
+# 不需要用不上的 MITM 代理（录制可关，需要时仍可开）。
+runtime:
+  requires_traffic_capture: false
 enforcement:
   mode: hard
   layers:
