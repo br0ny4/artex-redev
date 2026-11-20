@@ -783,6 +783,12 @@ func (s *Server) Handler() http.Handler {
 	s.registerFindingTraffic(mux)
 	mux.HandleFunc("GET /api/exploration/findings/{id}", s.getFinding)
 	mux.HandleFunc("GET /api/exploration/findings/{id}/lineage", s.findingLineage)
+	// 0day 准入：反例验证（门一）+ 撞车比对（门二）。导出报告前强制过门。
+	mux.HandleFunc("GET /api/exploration/findings/{id}/gate", s.getFindingGate)
+	mux.HandleFunc("POST /api/exploration/findings/{id}/gate/counterexamples", s.addFindingCounterexample)
+	mux.HandleFunc("DELETE /api/exploration/findings/{id}/gate/counterexamples/{ceid}", s.deleteFindingCounterexample)
+	mux.HandleFunc("POST /api/exploration/findings/{id}/gate/novelty", s.addFindingNoveltyCheck)
+	mux.HandleFunc("DELETE /api/exploration/findings/{id}/gate/novelty/{nid}", s.deleteFindingNoveltyCheck)
 	mux.HandleFunc("POST /api/exploration/findings/{id}/deepen", s.deepenFinding)
 	mux.HandleFunc("GET /api/exploration/findings/{id}/retests", s.listFindingRetests)
 	mux.HandleFunc("GET /api/exploration/findings/retests/active", s.listActiveFindingRetests)
@@ -2158,6 +2164,10 @@ func (s *Server) findingsExport(w http.ResponseWriter, r *http.Request) {
 	fs, err := s.m.pg.ListFindingsForExport(filter, ids)
 	if err != nil {
 		writeErr(w, 500, err.Error())
+		return
+	}
+	// 0day 准入：未过门的 finding 不许出现在交付物里（逐条给原因，见 enforceFindingGate）。
+	if !s.enforceFindingGate(w, r, fs) {
 		return
 	}
 

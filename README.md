@@ -70,7 +70,7 @@ FLASH 通报，全球金融/政府/科技/国防等行业受影响；公网上�
 | P1.6 | hold 生命周期（全量停止 → 操作员答复 → 恢复 → 任务暂停/续跑）、操作台 | ✅ |
 | P1.7 | `/api/auth/init` 一次性 setup token + 前端配合 | ✅ |
 | P2 | 离线域包：`binary_re`（radare2-mcp / Ghidra headless）✅、`source_audit`（Semgrep/Joern/ast-grep）✅、`malware_triage`（capa/YARA/FLOSS）✅ | 🚧 在线域 `bounty_recon`、CDP 浏览器分析 |
-| P2.5 | 0day 流水线：攻击面提取 → 候选 → 可达性 → **触发验证**（无 PoC 不算 finding） | 📋 |
+| P2.5 | 0day 流水线：攻击面提取 → 候选 → 可达性 → 触发验证 → **两道准入门**（≥5 条反例 + ≥3 次跨源撞车比对） | 🚧 准入强制已落地（[08](docs/redev/08-0day-pipeline.md)） |
 | P3 | 在线域包：`web_pentest`（继承 ARTEX）✅ + `bounty_recon` + CDP 浏览器分析 | 🚧 |
 | P4 | 蓝队域包（检测工程 + agentic 攻击者检测规则）、多域报告、测评台（XBOW 104） | 📋 |
 

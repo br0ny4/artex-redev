@@ -141,6 +141,9 @@ func TestFindingTrafficToolUpgradePreservesCustomization(t *testing.T) {
 }
 
 func TestFindingTrafficAPIAndExport(t *testing.T) {
+	// 本用例验证的是导出链路（zip/证据打包），不是 0day 准入；旧 finding 没有门记录，
+	// 这里显式关闭门，门本身的用例在 finding_gate_test.go。
+	t.Setenv("ARTEX_FINDING_GATE", "off")
 	s, f, req := trafficEvidenceServer(t)
 	body := bytes.Repeat([]byte{0, 255, 65, 66}, 5000)
 	for _, id := range []string{"a", "b", "c"} {
@@ -387,6 +390,7 @@ func TestFindingTrafficFailedReportDoesNotTrigger(t *testing.T) {
 }
 
 func TestFindingTrafficUTF8SegmentsAndInheritedWrites(t *testing.T) {
+	t.Setenv("ARTEX_FINDING_GATE", "off")
 	s, f, req := trafficEvidenceServer(t)
 	ctx := context.Background()
 	text := strings.Repeat("中文证据🙂", 2000)

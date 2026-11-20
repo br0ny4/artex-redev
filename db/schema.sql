@@ -1427,3 +1427,32 @@ CREATE TABLE IF NOT EXISTS policy_holds (
 -- 旧库补列（幂等）
 ALTER TABLE policy_holds ADD COLUMN IF NOT EXISTS engine_hold_id BIGINT NOT NULL DEFAULT 0;
 CREATE INDEX IF NOT EXISTS idx_policy_holds_task ON policy_holds(task_id, status);
+
+-- 0day 准入门的记录：反例（阴性对照）与撞车比对。
+-- 为什么单独建表而不是往 findings 塞 JSON：这两件事要逐条核对、逐条审计，
+-- 且"补一条反例"是增量动作；行级记录才能回答"这 5 条是不同路径还是同一个副本"。
+CREATE TABLE IF NOT EXISTS finding_counterexamples (
+    id          BIGSERIAL PRIMARY KEY,
+    finding_id  BIGINT NOT NULL REFERENCES findings(id) ON DELETE CASCADE,
+    -- ordinal 是"第几条反例"的人读序号，由 DB 侧 MAX+1 生成，只在同一 finding 内唯一。
+    ordinal     INT NOT NULL DEFAULT 0,
+    claim       TEXT NOT NULL DEFAULT '',   -- 要排除的误报路径
+    method      TEXT NOT NULL DEFAULT '',   -- 验证手法（变体/降级/对照环境）
+    expected    TEXT NOT NULL DEFAULT '',   -- 正常情况下应观察到什么
+    observed    TEXT NOT NULL DEFAULT '',   -- 实际观察到什么
+    passed      BOOLEAN NOT NULL DEFAULT false, -- true = 漏洞在反例条件下未出现
+    evidence    TEXT NOT NULL DEFAULT '',   -- 流量 id / 命令输出摘要等可核对凭据
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_finding_counterexamples_finding ON finding_counterexamples(finding_id, ordinal);
+
+CREATE TABLE IF NOT EXISTS finding_novelty_checks (
+    id           BIGSERIAL PRIMARY KEY,
+    finding_id   BIGINT NOT NULL REFERENCES findings(id) ON DELETE CASCADE,
+    query        TEXT NOT NULL DEFAULT '',  -- 实际使用的检索关键词
+    source_class TEXT NOT NULL DEFAULT '',  -- cve | vendor | github | advisory | search | other
+    hits         JSONB NOT NULL DEFAULT '[]', -- 命中条目（标题/链接），便于人工复核
+    same_vuln    BOOLEAN NOT NULL DEFAULT false, -- 命中公开的同一致命漏洞 = 撞车
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_finding_novelty_finding ON finding_novelty_checks(finding_id, id);
