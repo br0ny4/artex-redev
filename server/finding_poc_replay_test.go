@@ -30,12 +30,14 @@ func stubPocReplay(t *testing.T, status int, body, trafficID, denied string) *in
 // gateView 是测试里对 gate 响应的最小解码。
 type gateView struct {
 	Gate struct {
-		State            string   `json:"state"`
-		Reasons          []string `json:"reasons"`
-		Notes            []string `json:"notes"`
-		PocReproductions int      `json:"poc_reproductions"`
-		PocReplays       int      `json:"poc_replays"`
-		PocReplayMatched int      `json:"poc_replay_matched"`
+		State             string   `json:"state"`
+		Reasons           []string `json:"reasons"`
+		Notes             []string `json:"notes"`
+		PocReproductions  int      `json:"poc_reproductions"`
+		PocReplays        int      `json:"poc_replays"`
+		PocReplayMatched  int      `json:"poc_replay_matched"`
+		NoveltyPlatform   int      `json:"novelty_platform"`
+		NoveltyUnreviewed int      `json:"novelty_unreviewed"`
 	} `json:"gate"`
 	Poc struct {
 		Kind               string   `json:"kind"`
@@ -52,19 +54,29 @@ type gateView struct {
 		Detail     string `json:"detail"`
 	} `json:"poc_replays"`
 	Novelty []struct {
+		ID          int64    `json:"id"`
 		Query       string   `json:"query"`
 		SourceClass string   `json:"source_class"`
 		Origin      string   `json:"origin"`
 		Hits        []string `json:"hits"`
+		SameVuln    bool     `json:"same_vuln"`
+		ReviewedBy  string   `json:"reviewed_by"`
+		ReviewedAt  string   `json:"reviewed_at"`
+		ReviewNote  string   `json:"review_note"`
 	} `json:"novelty_checks"`
 }
 
 // Checks 返回撞车比对记录（门二的记录在 gate 响应的 novelty_checks 里）。
 func (g gateView) Checks() []struct {
+	ID          int64    `json:"id"`
 	Query       string   `json:"query"`
 	SourceClass string   `json:"source_class"`
 	Origin      string   `json:"origin"`
 	Hits        []string `json:"hits"`
+	SameVuln    bool     `json:"same_vuln"`
+	ReviewedBy  string   `json:"reviewed_by"`
+	ReviewedAt  string   `json:"reviewed_at"`
+	ReviewNote  string   `json:"review_note"`
 } {
 	return g.Novelty
 }

@@ -702,6 +702,12 @@ export const api = {
       gate: GateVerdict;
       requirements: FindingGateRequirements;
     }>(`/exploration/findings/${encodeURIComponent(id)}/gate/novelty/probe`, { queries }),
+  // 复核一条撞车比对记录：谁复核、是否撞车、依据。未复核的平台代检记录会阻断门二。
+  reviewFindingNovelty: (id: string, nid: number, body: { reviewed_by: string; same_vuln: boolean; note: string }) =>
+    post<{ novelty_check: GateNoveltyCheck; gate: GateVerdict; requirements: FindingGateRequirements }>(
+      `/exploration/findings/${encodeURIComponent(id)}/gate/novelty/${nid}/review`,
+      body,
+    ),
   deleteFindingNoveltyCheck: (id: string, nid: number) =>
     del<{ deleted: boolean }>(`/exploration/findings/${encodeURIComponent(id)}/gate/novelty/${nid}`),
   setFindingPoc: (id: string, body: GatePoc) =>

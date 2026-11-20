@@ -115,7 +115,7 @@ func (d *DB) DeleteFindingNoveltyCheck(ctx context.Context, findingID, id int64)
 // ListFindingNoveltyChecks 按写入顺序返回一条 finding 的撞车比对。
 func (d *DB) ListFindingNoveltyChecks(ctx context.Context, findingID int64) ([]vulngate.NoveltyCheck, error) {
 	rows, err := d.QueryContext(ctx, `
-		SELECT id, query, source_class, hits, same_vuln, origin
+		SELECT id, query, source_class, hits, same_vuln, origin, reviewed_by, reviewed_at, review_note
 		FROM finding_novelty_checks WHERE finding_id=$1 ORDER BY id`, findingID)
 	if err != nil {
 		return nil, err
@@ -123,15 +123,50 @@ func (d *DB) ListFindingNoveltyChecks(ctx context.Context, findingID int64) ([]v
 	defer rows.Close()
 	var out []vulngate.NoveltyCheck
 	for rows.Next() {
-		var n vulngate.NoveltyCheck
-		var hits string
-		if err := rows.Scan(&n.ID, &n.Query, &n.SourceClass, &hits, &n.SameVuln, &n.Origin); err != nil {
+		n, err := scanNoveltyCheckRow(rows)
+		if err != nil {
 			return nil, err
 		}
-		_ = json.Unmarshal([]byte(hits), &n.Hits)
 		out = append(out, n)
 	}
 	return out, rows.Err()
+}
+
+// noveltyScannable 是 sql.Row / sql.Rows 的公共能力（两者都满足）。
+type noveltyScannable interface {
+	Scan(dest ...any) error
+}
+
+// scanNoveltyCheckRow 统一读取撞车记录（含复核留痕三列）。
+func scanNoveltyCheckRow(row noveltyScannable) (vulngate.NoveltyCheck, error) {
+	var n vulngate.NoveltyCheck
+	var hits string
+	var reviewedAt sql.NullTime
+	if err := row.Scan(&n.ID, &n.Query, &n.SourceClass, &hits, &n.SameVuln, &n.Origin,
+		&n.ReviewedBy, &reviewedAt, &n.ReviewNote); err != nil {
+		return n, err
+	}
+	if reviewedAt.Valid {
+		t := reviewedAt.Time
+		n.ReviewedAt = &t
+	}
+	_ = json.Unmarshal([]byte(hits), &n.Hits)
+	return n, nil
+}
+
+// SetFindingNoveltyReview 记录一次人工复核结论：谁复核、何时、依据，以及是否撞车。
+// 未复核的平台代检记录不计入门二（见 vulngate.Assess），所以这一步是准入门的一部分。
+func (d *DB) SetFindingNoveltyReview(ctx context.Context, findingID, checkID int64, reviewedBy, note string, sameVuln bool) (vulngate.NoveltyCheck, error) {
+	if findingID <= 0 || checkID <= 0 {
+		return vulngate.NoveltyCheck{}, errors.New("finding_id/check_id 必须为正")
+	}
+	row := d.QueryRowContext(ctx, `
+		UPDATE finding_novelty_checks
+		SET same_vuln=$3, reviewed_by=$4, reviewed_at=now(), review_note=$5
+		WHERE id=$1 AND finding_id=$2
+		RETURNING id, query, source_class, hits, same_vuln, origin, reviewed_by, reviewed_at, review_note`,
+		checkID, findingID, sameVuln, reviewedBy, note)
+	return scanNoveltyCheckRow(row)
 }
 
 // FindingGateAssessment 汇总一条 finding 的全部门记录。
@@ -192,7 +227,7 @@ func (d *DB) FindingGateVerdicts(ctx context.Context, ids []int64) (map[int64]vu
 
 	nov := map[int64][]vulngate.NoveltyCheck{}
 	rows, err = d.QueryContext(ctx, `
-		SELECT finding_id, id, query, source_class, hits, same_vuln, origin
+		SELECT finding_id, id, query, source_class, hits, same_vuln, origin, reviewed_by, reviewed_at, review_note
 		FROM finding_novelty_checks WHERE finding_id = ANY($1) ORDER BY finding_id, id`, ids)
 	if err != nil {
 		return nil, err
@@ -201,9 +236,15 @@ func (d *DB) FindingGateVerdicts(ctx context.Context, ids []int64) (map[int64]vu
 		var fid int64
 		var n vulngate.NoveltyCheck
 		var hits string
-		if err := rows.Scan(&fid, &n.ID, &n.Query, &n.SourceClass, &hits, &n.SameVuln, &n.Origin); err != nil {
+		var reviewedAt sql.NullTime
+		if err := rows.Scan(&fid, &n.ID, &n.Query, &n.SourceClass, &hits, &n.SameVuln, &n.Origin,
+			&n.ReviewedBy, &reviewedAt, &n.ReviewNote); err != nil {
 			rows.Close()
 			return nil, err
+		}
+		if reviewedAt.Valid {
+			t := reviewedAt.Time
+			n.ReviewedAt = &t
 		}
 		_ = json.Unmarshal([]byte(hits), &n.Hits)
 		nov[fid] = append(nov[fid], n)

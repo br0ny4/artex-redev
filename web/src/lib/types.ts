@@ -1736,6 +1736,10 @@ export interface GateNoveltyCheck {
   same_vuln: boolean;
   // manual = 人/agent 登记；platform = 平台代执行检索（真的请求了公开漏洞库并落下命中）。
   origin?: "manual" | "platform";
+  // 复核留痕：平台代检命中的条目要人看过才算数（未复核会阻断门二）。
+  reviewed_by?: string;
+  reviewed_at?: string;
+  review_note?: string;
 }
 
 export interface GatePoc {
@@ -1773,6 +1777,8 @@ export interface GateVerdict {
   poc_replays?: number;
   poc_replay_matched?: number;
   novelty_platform?: number;
+  /** 平台代检有命中但还没有人复核的记录数；>0 时门二阻断。 */
+  novelty_unreviewed?: number;
   notes?: string[];
 }
 

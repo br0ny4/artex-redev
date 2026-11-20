@@ -64,6 +64,7 @@ ARTEX 被大规模滥用（FBI FLASH 通报、1400+ 无鉴权控制台）恰好�
 | 三道准入门：PoC 可复现 + ≥5 条反例 + ≥3 次跨源撞车比对 | `vulngate/gate.go` | `vulngate TestAssessPassesWhenBothGatesSatisfied` |
 | 门三：平台经录制代理重放 PoC、机器判定、按实测抬高复现次数 | `server/finding_poc_replay.go` | `server TestFindingPocReplayBackfillsMachineEvidence` |
 | 门二：平台代执行撞车检索（NVD / CISA KEV），查不动不算没撞车 | `novelty/novelty.go` | `novelty TestKEVSearchMatchesVersionedQuery` |
+| 门二复核留痕：平台代检命中必须人看过才计数（谁复核、何时、依据哪条命中） | `vulngate/gate.go` | `vulngate TestAssessBlocksUnreviewedPlatformProbe` |
 
 ### 4.3 对外可验能力（接口必须真实存在于 `server/`）
 

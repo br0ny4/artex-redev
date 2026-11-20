@@ -1,6 +1,7 @@
 package db
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -8,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/br0ny4/artex-redev/vulngate"
 )
 
 // TestDeleteFinding verifies删除漏洞 removes both the findings row and its
@@ -515,5 +518,63 @@ func TestAddFindingFollowUpIntent(t *testing.T) {
 	}
 	if _, _, err := store.AddFindingFollowUpIntent(findingID, findingNodeID, "should fail", auditInput); !errors.Is(err, ErrFindingOriginUnavailable) {
 		t.Fatalf("missing source node: want ErrFindingOriginUnavailable, got %v", err)
+	}
+}
+
+// TestFindingNoveltyReviewTrail 验证复核留痕能落库并读回：谁复核、何时、依据、
+// 以及是否撞车。门二不认"平台查了"当结论，认的是"人看过命中条目后的判断"。
+func TestFindingNoveltyReviewTrail(t *testing.T) {
+	d, err := Open(testDSN(t))
+	if err != nil {
+		t.Skipf("postgres unavailable (%v) — skipping", err)
+	}
+	defer d.Close()
+
+	const vc = "__test_vc_novelty_review__"
+	cleanup := func() { _, _ = d.Exec(`DELETE FROM findings WHERE vulnclass=$1`, vc) }
+	cleanup()
+	defer cleanup()
+
+	fid, err := d.AddFinding(0, 0, vc, "复核留痕", "high", "summary", "poc", "tester", nil)
+	if err != nil {
+		t.Fatalf("AddFinding: %v", err)
+	}
+	n, err := d.AddFindingNoveltyCheck(context.Background(), fid, vulngate.NoveltyCheck{
+		Query: "acme widget traversal", SourceClass: "cve",
+		Hits: []string{"CVE-2021-0001 · Acme Widget"}, Origin: "platform",
+	})
+	if err != nil {
+		t.Fatalf("AddFindingNoveltyCheck: %v", err)
+	}
+	if n.ReviewedBy != "" || n.ReviewedAt != nil {
+		t.Fatalf("新记录不该带复核留痕：%+v", n)
+	}
+
+	got, err := d.SetFindingNoveltyReview(context.Background(), fid, n.ID, "alice", "命中是另一产品线，不构成撞车", false)
+	if err != nil {
+		t.Fatalf("SetFindingNoveltyReview: %v", err)
+	}
+	if got.ReviewedBy != "alice" || got.ReviewedAt == nil || got.ReviewNote == "" {
+		t.Fatalf("复核留痕没落库：%+v", got)
+	}
+	// 复核后 same_vuln 可改判为撞车（同一行，不新增记录）。
+	got, err = d.SetFindingNoveltyReview(context.Background(), fid, n.ID, "bob", "同一组件同一触发点", true)
+	if err != nil {
+		t.Fatalf("改判撞车: %v", err)
+	}
+	if !got.SameVuln || got.ReviewedBy != "bob" {
+		t.Fatalf("改判结果不对：%+v", got)
+	}
+
+	a, err := d.FindingGateAssessment(context.Background(), fid)
+	if err != nil {
+		t.Fatalf("FindingGateAssessment: %v", err)
+	}
+	if len(a.Novelty) != 1 || a.Novelty[0].ReviewedBy != "bob" || a.Novelty[0].ReviewedAt == nil {
+		t.Fatalf("评估读回复核留痕不对：%+v", a.Novelty)
+	}
+	// 找不到的记录要报错，不能静默成功。
+	if _, err := d.SetFindingNoveltyReview(context.Background(), fid, 99999999, "alice", "", false); err == nil {
+		t.Fatal("不存在的 check_id 应报错")
 	}
 }

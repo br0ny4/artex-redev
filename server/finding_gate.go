@@ -7,6 +7,7 @@ package server
 // 而不是一次性的表单校验。
 
 import (
+	"database/sql"
 	"encoding/json"
 	"log"
 	"net/http"
@@ -212,6 +213,65 @@ func (s *Server) addFindingNoveltyCheck(w http.ResponseWriter, r *http.Request) 
 	}
 	v := vulngate.Assess(a)
 	writeJSON(w, 200, map[string]any{"novelty_check": n, "gate": v, "requirements": gateRequirements()})
+}
+
+// noveltyReviewPayload 是一次人工复核的输入。复核人必须留名：机器代检只证明
+// "查到了这些条目"，"是不是同一个漏洞"是人做的判断，判断要能被审计。
+type noveltyReviewPayload struct {
+	ReviewedBy string `json:"reviewed_by"`
+	SameVuln   bool   `json:"same_vuln"`
+	Note       string `json:"note"`
+}
+
+// reviewFindingNoveltyCheck 记录对一条撞车比对记录（通常是平台代检命中）的复核结论。
+// 未复核的平台代检记录不计入门二，所以这个接口是"让门继续往前走"的必要动作。
+func (s *Server) reviewFindingNoveltyCheck(w http.ResponseWriter, r *http.Request) {
+	id := int64(atoiDefault(r.PathValue("id"), 0))
+	nid := int64(atoiDefault(r.PathValue("nid"), 0))
+	if id <= 0 || nid <= 0 {
+		writeErr(w, 400, "bad id")
+		return
+	}
+	var p noveltyReviewPayload
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&p); err != nil {
+		writeErr(w, 400, "解析请求失败: "+err.Error())
+		return
+	}
+	p.ReviewedBy = strings.TrimSpace(p.ReviewedBy)
+	p.Note = strings.TrimSpace(p.Note)
+	if p.ReviewedBy == "" {
+		writeErr(w, 400, "复核人不能为空：机器不替人判\"是不是同一个漏洞\"，复核要留名")
+		return
+	}
+	if len(p.ReviewedBy) > 64 {
+		writeErr(w, 400, "复核人过长（≤64 字符）")
+		return
+	}
+	if len(p.Note) > 2000 {
+		writeErr(w, 400, "复核依据过长（≤2000 字符）")
+		return
+	}
+	if p.SameVuln && p.Note == "" {
+		writeErr(w, 400, "标记为撞车必须写清依据：依据哪条命中、为什么是同一个漏洞（复核结论要可复核，不能只写\"撞了\"）")
+		return
+	}
+	n, err := s.m.pg.SetFindingNoveltyReview(r.Context(), id, nid, p.ReviewedBy, p.Note, p.SameVuln)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			writeErr(w, 404, "novelty check not found")
+			return
+		}
+		writeErr(w, 500, err.Error())
+		return
+	}
+	a, err := s.m.pg.FindingGateAssessment(r.Context(), id)
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]any{
+		"novelty_check": n, "gate": vulngate.Assess(a), "requirements": gateRequirements(),
+	})
 }
 
 // deleteFindingNoveltyCheck 撤回一次撞车比对。

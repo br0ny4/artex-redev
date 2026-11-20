@@ -126,6 +126,13 @@ export function FindingGatePanel({ findingId, readOnly = false }: { findingId: s
             />
             <ProgressRow label="撞车比对 · 检索次数" current={v.novelty_queries} min={req.min_novelty_queries} />
             <ProgressRow label="撞车比对 · 信息源类别" current={v.source_classes} min={req.min_source_classes} />
+            {v.novelty_platform ? (
+              <ProgressRow
+                label="撞车比对 · 平台代检已复核"
+                current={Math.max(0, v.novelty_platform - (v.novelty_unreviewed ?? 0))}
+                min={v.novelty_platform}
+              />
+            ) : null}
           </div>
           {v.notes?.length ? (
             <Alert>
@@ -185,8 +192,22 @@ export function FindingGatePanel({ findingId, readOnly = false }: { findingId: s
         readOnly={readOnly}
         busy={busy === "nv"}
         probeBusy={busy === "probe"}
+        reviewBusy={busy === "review"}
         onAdd={(n) => run("nv", () => api.addFindingNoveltyCheck(findingId, n))}
         onDelete={(id) => run("nv", () => api.deleteFindingNoveltyCheck(findingId, id))}
+        onReview={(id, body) =>
+          run("review", async () => {
+            const r = await api.reviewFindingNovelty(findingId, id, body);
+            const left = r.gate.novelty_unreviewed ?? 0;
+            if (body.same_vuln) {
+              toast.error("已标记撞车：门二会阻断，重复提交是负资产");
+            } else if (left > 0) {
+              toast.success(`复核已记录，还有 ${left} 条平台代检待复核`);
+            } else {
+              toast.success("复核已记录：平台代检命中已人工确认无同一漏洞");
+            }
+          })
+        }
         onProbe={(queries) =>
           run("probe", async () => {
             const r = await api.probeFindingNovelty(findingId, queries);
@@ -543,17 +564,27 @@ function NoveltySection({
   onAdd,
   onDelete,
   onProbe,
+  onReview,
+  reviewBusy,
 }: {
   items: GateNoveltyCheck[];
   readOnly: boolean;
   busy: boolean;
   probeBusy: boolean;
+  reviewBusy: boolean;
+  onReview: (id: number, body: { reviewed_by: string; same_vuln: boolean; note: string }) => void;
   onAdd: (n: { query: string; source_class: string; hits: string[]; same_vuln: boolean }) => void;
   onDelete: (id: number) => void;
   onProbe: (queries: string[]) => void;
 }) {
   const [form, setForm] = React.useState({ query: "", source_class: "cve", hits: "", same_vuln: false });
   const [probe, setProbe] = React.useState("");
+  const [review, setReview] = React.useState({
+    id: null as number | null,
+    reviewed_by: "",
+    note: "",
+    same_vuln: false,
+  });
   const probeQueries = probe
     .split("\n")
     .map((s) => s.trim())
@@ -569,27 +600,96 @@ function NoveltySection({
       <CardContent className="flex flex-col gap-3">
         {items.length === 0 ? <p className="text-sm text-muted-foreground">（还没有记录）</p> : null}
         <div className="flex flex-col divide-y rounded-md border">
-          {items.map((n) => (
-            <div key={n.id} className="flex items-start gap-3 p-2.5">
-              <Badge variant={n.same_vuln ? "destructive" : "outline"} className="mt-0.5 shrink-0">
-                {n.same_vuln
-                  ? "撞车"
-                  : (SOURCE_CLASSES.find((s) => s.value === n.source_class)?.label ?? n.source_class)}
-              </Badge>
-              <Badge variant="secondary" className="mt-0.5 shrink-0">
-                {n.origin === "platform" ? "平台代检" : "人工登记"}
-              </Badge>
-              <div className="flex min-w-0 flex-1 flex-col gap-0.5 text-xs">
-                <span className="font-medium break-all">{n.query}</span>
-                {n.hits?.length ? <span className="text-muted-foreground">命中：{n.hits.join(" / ")}</span> : null}
+          {items.map((n) => {
+            const needsReview = n.origin === "platform" && (n.hits?.length ?? 0) > 0 && !n.reviewed_by;
+            return (
+              <div key={n.id} className="flex flex-col gap-2 p-2.5">
+                <div className="flex items-start gap-3">
+                  <Badge variant={n.same_vuln ? "destructive" : "outline"} className="mt-0.5 shrink-0">
+                    {n.same_vuln
+                      ? "撞车"
+                      : (SOURCE_CLASSES.find((s) => s.value === n.source_class)?.label ?? n.source_class)}
+                  </Badge>
+                  <Badge variant="secondary" className="mt-0.5 shrink-0">
+                    {n.origin === "platform" ? "平台代检" : "人工登记"}
+                  </Badge>
+                  <div className="flex min-w-0 flex-1 flex-col gap-0.5 text-xs">
+                    <span className="font-medium break-all">{n.query}</span>
+                    {n.hits?.length ? <span className="text-muted-foreground">命中：{n.hits.join(" / ")}</span> : null}
+                  </div>
+                  {!readOnly && n.id ? (
+                    <Button variant="ghost" size="sm" disabled={busy} onClick={() => onDelete(n.id as number)}>
+                      <Trash2Icon className="size-3.5" />
+                    </Button>
+                  ) : null}
+                </div>
+                {n.origin === "platform" && (n.hits?.length ?? 0) > 0 ? (
+                  n.reviewed_by ? (
+                    <div className="pl-1 text-xs text-muted-foreground">
+                      已复核（{n.same_vuln ? "撞车" : "无同一漏洞"}）· {n.reviewed_by}
+                      {n.reviewed_at ? ` · ${new Date(n.reviewed_at).toLocaleString()}` : ""}
+                      {n.review_note ? ` · 依据：${n.review_note}` : ""}
+                    </div>
+                  ) : !readOnly && n.id ? (
+                    review.id === n.id ? (
+                      <div className="flex flex-col gap-2 rounded-md bg-muted/40 p-2">
+                        <div className="grid gap-2 sm:grid-cols-2">
+                          <Input
+                            placeholder="复核人"
+                            value={review.reviewed_by}
+                            onChange={(e) => setReview({ ...review, reviewed_by: e.target.value })}
+                          />
+                          <Input
+                            placeholder="复核依据（撞车时必填：依据哪条命中）"
+                            value={review.note}
+                            onChange={(e) => setReview({ ...review, note: e.target.value })}
+                          />
+                        </div>
+                        <span className="flex items-center gap-2 text-xs">
+                          <Checkbox
+                            id={`nv-review-same-${n.id}`}
+                            checked={review.same_vuln}
+                            onCheckedChange={(checked) => setReview({ ...review, same_vuln: checked === true })}
+                          />
+                          <label htmlFor={`nv-review-same-${n.id}`}>命中里有同一漏洞（撞车）</label>
+                        </span>
+                        <div className="flex justify-end gap-2">
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => setReview({ id: null, reviewed_by: "", note: "", same_vuln: false })}
+                          >
+                            取消
+                          </Button>
+                          <Button
+                            size="sm"
+                            disabled={reviewBusy || !review.reviewed_by.trim()}
+                            onClick={() => onReview(n.id as number, review)}
+                          >
+                            {reviewBusy ? <Spinner /> : null} 记录复核
+                          </Button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-2 pl-1">
+                        <Badge variant="outline">待复核（未复核会阻断门二）</Badge>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={reviewBusy}
+                          onClick={() => setReview({ id: n.id as number, reviewed_by: "", note: "", same_vuln: false })}
+                        >
+                          复核命中
+                        </Button>
+                      </div>
+                    )
+                  ) : (
+                    <div className="pl-1 text-xs text-amber-600">平台代检命中待复核（门二会阻断）</div>
+                  )
+                ) : null}
               </div>
-              {!readOnly && n.id ? (
-                <Button variant="ghost" size="sm" disabled={busy} onClick={() => onDelete(n.id as number)}>
-                  <Trash2Icon className="size-3.5" />
-                </Button>
-              ) : null}
-            </div>
-          ))}
+            );
+          })}
         </div>
         {!readOnly ? (
           <div className="flex flex-col gap-2 rounded-md border border-dashed p-2.5">

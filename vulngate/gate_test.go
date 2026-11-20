@@ -3,6 +3,7 @@ package vulngate
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 func okCounterexamples(n int) []Counterexample {
@@ -165,5 +166,57 @@ func TestVerdictJSONShape(t *testing.T) {
 	}
 	if len(v.Reasons) < 3 {
 		t.Fatalf("应同时报出三道门的问题，得到 %v", v.Reasons)
+	}
+}
+
+// 平台代检只说明"查到了这些条目"，是否同一漏洞必须人复核。未复核就想过门等于
+// 让机器替人下结论——这正是准入门要防的"伪证据"。
+func TestAssessBlocksUnreviewedPlatformProbe(t *testing.T) {
+	nov := append(okNovelty(2),
+		NoveltyCheck{Query: "acme widget path traversal", SourceClass: "cve",
+			Hits: []string{"CVE-2021-0001 · Acme Widget traversal"}, Origin: "platform"})
+	v := Assess(Assessment{Counterexamples: okCounterexamples(5), Novelty: nov, Poc: okPoc()})
+	if v.Passed() {
+		t.Fatalf("平台代检命中未复核不该放行，reasons=%v", v.Reasons)
+	}
+	if v.NoveltyUnreviewed != 1 {
+		t.Fatalf("未复核数应为 1，得到 %d", v.NoveltyUnreviewed)
+	}
+	if !strings.Contains(strings.Join(v.Reasons, "; "), "尚未复核") {
+		t.Fatalf("原因没提复核：%v", v.Reasons)
+	}
+}
+
+// 复核后（无同一漏洞）应放行，并在 notes 里说明复核留痕已落库。
+func TestAssessPassesAfterPlatformReview(t *testing.T) {
+	reviewed := time.Now()
+	nov := append(okNovelty(2),
+		NoveltyCheck{Query: "acme widget path traversal", SourceClass: "cve",
+			Hits: []string{"CVE-2021-0001 · Acme Widget traversal"}, Origin: "platform",
+			ReviewedBy: "alice", ReviewedAt: &reviewed, ReviewNote: "命中是另一个产品线，不构成撞车"})
+	v := Assess(Assessment{Counterexamples: okCounterexamples(5), Novelty: nov, Poc: okPoc()})
+	if !v.Passed() {
+		t.Fatalf("复核后应放行，reasons=%v", v.Reasons)
+	}
+	if v.NoveltyUnreviewed != 0 {
+		t.Fatalf("复核后未复核数应为 0，得到 %d", v.NoveltyUnreviewed)
+	}
+	if !strings.Contains(strings.Join(v.Notes, "; "), "已人工复核") {
+		t.Fatalf("notes 应说明已复核：%v", v.Notes)
+	}
+}
+
+// 复核结论是"撞车"时仍然阻断，并把命中条目带出来让人能直接去看。
+func TestAssessBlocksOnReviewedDuplicate(t *testing.T) {
+	nov := append(okNovelty(2),
+		NoveltyCheck{Query: "acme widget rce", SourceClass: "cve",
+			Hits: []string{"CVE-2021-0001 · Acme Widget traversal"}, Origin: "platform",
+			SameVuln: true, ReviewedBy: "alice", ReviewNote: "同一组件同一触发点"})
+	v := Assess(Assessment{Counterexamples: okCounterexamples(5), Novelty: nov, Poc: okPoc()})
+	if v.Passed() {
+		t.Fatal("复核为撞车时不该放行")
+	}
+	if !strings.Contains(strings.Join(v.Reasons, "; "), "CVE-2021-0001") {
+		t.Fatalf("撞车原因应带命中编号：%v", v.Reasons)
 	}
 }

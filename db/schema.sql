@@ -1462,6 +1462,12 @@ CREATE INDEX IF NOT EXISTS idx_finding_novelty_finding ON finding_novelty_checks
 -- origin：这条检索记录是人工/agent 登记（manual）还是平台代执行（platform）。
 -- 平台记录意味着平台真的请求了公开漏洞库并落下了返回条目，可逐条复核。
 ALTER TABLE finding_novelty_checks ADD COLUMN IF NOT EXISTS origin TEXT NOT NULL DEFAULT 'manual';
+-- 复核留痕：平台代检把"查到了哪些公开漏洞"落库，但"是不是同一个漏洞"必须人来看。
+-- reviewed_by 非空 = 这条命中已由人复核；reviewed_at 记录何时；review_note 记录依据
+-- （依据哪条命中、为什么算/不算撞车）。未复核的平台代检记录不计入门二。
+ALTER TABLE finding_novelty_checks ADD COLUMN IF NOT EXISTS reviewed_by TEXT NOT NULL DEFAULT '';
+ALTER TABLE finding_novelty_checks ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMPTZ;
+ALTER TABLE finding_novelty_checks ADD COLUMN IF NOT EXISTS review_note TEXT NOT NULL DEFAULT '';
 
 -- 门三：触发验证（PoC）。一条 finding 只保留最新一份（写了新的覆盖旧的），
 -- 因为"能复现的触发方式"应当是收敛的结论，而不是一堆尝试记录。

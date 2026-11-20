@@ -93,7 +93,8 @@
 ### 门二：撞车比对（`MinNoveltyQueries = 3`、`MinSourceClasses = 2`）
 
 每次检索记录：`query`（实际关键词）、`source_class`（`cve|vendor|github|advisory|search|other`）、
-`hits`（命中的标题/链接）、`same_vuln`（是否命中同一致命漏洞）。
+`hits`（命中的标题/链接）、`same_vuln`（是否命中同一致命漏洞）、
+`origin`（`manual|platform`）、`reviewed_by` / `reviewed_at` / `review_note`（复核留痕）。
 
 - 至少 **3 次不同检索**（大小写/空白归一化后去重）；
 - 至少覆盖 **2 类信息源**——只查 CVE 库不算比对完，厂商公告、代码托管平台上的 issue、
@@ -123,6 +124,20 @@
 - `gate.notes` 会注明"撞车比对已由平台代执行 N 次检索"或"目前只有人工登记记录"，
   不额外阻断（离线域/内网环境检索不到公网），但报告评审时一眼能看出证据成色。
 
+#### 复核留痕（`POST /api/exploration/findings/{id}/gate/novelty/{nid}/review`）
+
+平台代检解决"谁去查的"，复核留痕解决"谁看过的"。机器只认"查到了哪些条目"，
+**不替人判"是不是同一个漏洞"**（猜错两个方向都危险：把无关 CVE 当撞车=放弃真 0day；
+把同一漏洞当无关=重复提交）。所以有命中的平台代检记录必须人工复核：
+
+- 入参：`reviewed_by`（复核人，必填）、`same_vuln`（是否撞车）、`note`（依据；
+  **判撞车时必填**——要写清依据哪条命中、为什么是同一个漏洞）。
+- 复核结论写回同一条记录（`same_vuln` / `reviewed_by` / `reviewed_at` / `review_note`），
+  可改判，留的是最新判断；`GET …/gate` 会带出留痕。
+- **未复核的平台代检记录阻断门二**：原因写明"平台代检记录尚未复核（N 条）"，
+  `gate.novelty_unreviewed` 给出数量。机器查了但没人看，不算撞车比对完成。
+- 人工登记（`origin=manual`）的记录天然是人写的，不需要再复核一遍。
+
 ## 4. 接口
 
 ```bash
@@ -139,6 +154,11 @@ curl -X POST -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/jso
 curl -X POST -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
   -d '{"query":"ACME Gateway 4.2 RCE","source_class":"cve","hits":[],"same_vuln":false}' \
   http://127.0.0.1:8787/api/exploration/findings/12/gate/novelty
+
+# 复核一条平台代检命中（撞车时 note 必填，写清依据哪条命中）
+curl -X POST -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"reviewed_by":"alice","same_vuln":false,"note":"命中是另一产品线，不构成撞车"}' \
+  http://127.0.0.1:8787/api/exploration/findings/12/gate/novelty/7/review
 
 # 平台代执行撞车检索：真的请求 NVD / CISA KEV，命中条目落库（origin=platform）
 curl -X POST -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \

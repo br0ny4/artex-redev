@@ -24,6 +24,10 @@
     全部失败返回 502；`gate.notes` 注明"平台代执行 N 次检索"或"只有人工登记"。NVD 整词 AND 查不到时
     自动去掉通用漏洞词用产品/版本重查（结果带 `[下发日期]` 便于分辨老条目），KEV 按关键词覆盖度计分
     （`httpd↔HTTP Server`、`rce↔Remote Code Execution` 同义词展开）。
+  - **门二复核留痕**：平台代检把命中条目落库之后，必须有人复核"是不是同一个漏洞"并留下
+    `reviewed_by`/`reviewed_at`/`review_note`（`POST /api/exploration/findings/{id}/gate/novelty/{nid}/review`）。
+    **未复核的平台代检记录阻断门二**（`gate.novelty_unreviewed` 给出数量）——机器查了但没人看不算比对完成；
+    判撞车时 `note` 必填（要写清依据哪条命中）。机器不替人下结论：猜错两个方向都危险。
   - **门三机器证据：平台代执行重放**。PoC 可带 `expect_status` / `expect_body_contains`，`POST
     /api/exploration/findings/{id}/gate/poc/replay` 由平台经录制代理真实发包（仍受 L3 范围/语义/预算管控），
     自动判定是否与预期一致；一致时把 `reproduced` 抬到机器实测值并回填 `observed`/`evidence`（真实流量 id），

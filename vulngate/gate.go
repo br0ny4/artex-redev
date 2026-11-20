@@ -25,6 +25,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 	"unicode"
 )
 
@@ -67,6 +68,13 @@ type NoveltyCheck struct {
 	// （平台代执行，真的请求了公开漏洞库并落下了返回条目）。人工记录声明"我查过"，
 	// 平台记录证明"查过、结果是这样"。
 	Origin string `json:"origin,omitempty"`
+	// ReviewedBy / ReviewedAt / ReviewNote 是复核留痕：平台代检只证明"查到了这些
+	// 条目"，是否属于"同一个漏洞"必须由人看过命中条目后判定——机器猜错两个方向都
+	// 危险（把无关 CVE 当撞车=放弃真 0day；把同一漏洞当无关=重复提交）。
+	// 未复核的平台代检记录不计入门二（见 Assess），复核结论落库可审计。
+	ReviewedBy string     `json:"reviewed_by,omitempty"`
+	ReviewedAt *time.Time `json:"reviewed_at,omitempty"`
+	ReviewNote string     `json:"review_note,omitempty"`
 }
 
 // Poc 是门三要求的触发验证记录：可复制粘贴的输入 + 观察到的结果 + 复现次数。
@@ -110,6 +118,8 @@ type Verdict struct {
 	PocReplays            int      `json:"poc_replays"`
 	PocReplayMatched      int      `json:"poc_replay_matched"`
 	NoveltyPlatform       int      `json:"novelty_platform"`
+	// NoveltyUnreviewed 是"平台代检有命中但还没有人复核"的记录数；>0 时门二阻断。
+	NoveltyUnreviewed int `json:"novelty_unreviewed"`
 	// Notes 是不阻断放行、但操作员必须看到的提示（例如"触发验证未经平台重放"）。
 	Notes []string `json:"notes,omitempty"`
 }
@@ -163,9 +173,15 @@ func Assess(a Assessment) Verdict {
 	queries := map[string]bool{}
 	classes := map[string]bool{}
 	platformProbes := 0
+	unreviewed := 0
 	for _, n := range a.Novelty {
 		if norm(n.Origin) == "platform" {
 			platformProbes++
+			// 有命中的平台代检必须人看过：机器给的是"候选公开漏洞列表"，
+			// 不是"没撞车"的结论。
+			if len(n.Hits) > 0 && strings.TrimSpace(n.ReviewedBy) == "" {
+				unreviewed++
+			}
 		}
 		if q := norm(n.Query); q != "" {
 			queries[q] = true
@@ -189,6 +205,10 @@ func Assess(a Assessment) Verdict {
 	v.NoveltyQueries = len(queries)
 	v.SourceClasses = len(classes)
 	v.NoveltyPlatform = platformProbes
+	v.NoveltyUnreviewed = unreviewed
+	if unreviewed > 0 {
+		v.blockf("平台代检记录尚未复核（%d 条）：机器只负责\"查到什么\"，是否同一个漏洞要人看过命中条目并留下复核人与依据——在「准入」页逐条标记\"无同一漏洞\"或\"撞车\"", unreviewed)
+	}
 	if v.NoveltyQueries < MinNoveltyQueries {
 		v.blockf("撞车比对不足：需至少 %d 次不同检索，当前 %d 次", MinNoveltyQueries, v.NoveltyQueries)
 	}
@@ -200,8 +220,10 @@ func Assess(a Assessment) Verdict {
 	if v.NoveltyQueries > 0 {
 		if platformProbes == 0 {
 			v.note("撞车比对目前只有人工/agent 登记的记录，未经平台代执行检索；建议在「准入」页用「平台代检」跑一次（NVD / CISA KEV），由平台真实请求并落下命中条目")
+		} else if unreviewed == 0 {
+			v.note("撞车比对已由平台代执行 %d 次检索，命中条目均已人工复核（复核人/时间/依据已落库）", platformProbes)
 		} else {
-			v.note("撞车比对已由平台代执行 %d 次检索（命中条目已落库，可逐条复核）", platformProbes)
+			v.note("撞车比对已由平台代执行 %d 次检索，其中 %d 条命中待人工复核", platformProbes, unreviewed)
 		}
 	}
 
