@@ -51,6 +51,22 @@ type gateView struct {
 		Matched    bool   `json:"matched"`
 		Detail     string `json:"detail"`
 	} `json:"poc_replays"`
+	Novelty []struct {
+		Query       string   `json:"query"`
+		SourceClass string   `json:"source_class"`
+		Origin      string   `json:"origin"`
+		Hits        []string `json:"hits"`
+	} `json:"novelty_checks"`
+}
+
+// Checks 返回撞车比对记录（门二的记录在 gate 响应的 novelty_checks 里）。
+func (g gateView) Checks() []struct {
+	Query       string   `json:"query"`
+	SourceClass string   `json:"source_class"`
+	Origin      string   `json:"origin"`
+	Hits        []string `json:"hits"`
+} {
+	return g.Novelty
 }
 
 func decodeGate(t *testing.T, w *httptest.ResponseRecorder) gateView {

@@ -63,6 +63,10 @@ type NoveltyCheck struct {
 	SourceClass string   `json:"source_class"` // cve|vendor|github|advisory|search|other
 	Hits        []string `json:"hits"`         // 命中的标题/链接（便于人工复核）
 	SameVuln    bool     `json:"same_vuln"`    // 命中已被公开的同一致命漏洞 → 撞车
+	// Origin 标记这条检索记录是谁产生的：manual（人/agent 手工登记）或 platform
+	// （平台代执行，真的请求了公开漏洞库并落下了返回条目）。人工记录声明"我查过"，
+	// 平台记录证明"查过、结果是这样"。
+	Origin string `json:"origin,omitempty"`
 }
 
 // Poc 是门三要求的触发验证记录：可复制粘贴的输入 + 观察到的结果 + 复现次数。
@@ -105,6 +109,7 @@ type Verdict struct {
 	PocReproductions      int      `json:"poc_reproductions"`
 	PocReplays            int      `json:"poc_replays"`
 	PocReplayMatched      int      `json:"poc_replay_matched"`
+	NoveltyPlatform       int      `json:"novelty_platform"`
 	// Notes 是不阻断放行、但操作员必须看到的提示（例如"触发验证未经平台重放"）。
 	Notes []string `json:"notes,omitempty"`
 }
@@ -157,7 +162,11 @@ func Assess(a Assessment) Verdict {
 
 	queries := map[string]bool{}
 	classes := map[string]bool{}
+	platformProbes := 0
 	for _, n := range a.Novelty {
+		if norm(n.Origin) == "platform" {
+			platformProbes++
+		}
 		if q := norm(n.Query); q != "" {
 			queries[q] = true
 		}
@@ -179,11 +188,21 @@ func Assess(a Assessment) Verdict {
 	}
 	v.NoveltyQueries = len(queries)
 	v.SourceClasses = len(classes)
+	v.NoveltyPlatform = platformProbes
 	if v.NoveltyQueries < MinNoveltyQueries {
 		v.blockf("撞车比对不足：需至少 %d 次不同检索，当前 %d 次", MinNoveltyQueries, v.NoveltyQueries)
 	}
 	if v.SourceClasses < MinSourceClasses {
 		v.blockf("撞车比对覆盖面不足：需覆盖至少 %d 类信息源（CVE 库/厂商公告/代码托管/漏洞库检索），当前 %d 类", MinSourceClasses, v.SourceClasses)
+	}
+	// 平台代执行检索会把真实返回条目落库；只靠人工登记的"我查过"没法核实。
+	// 不阻断（离线域/内网检索不到公网），但必须让操作员看到这条证据的成色。
+	if v.NoveltyQueries > 0 {
+		if platformProbes == 0 {
+			v.note("撞车比对目前只有人工/agent 登记的记录，未经平台代执行检索；建议在「准入」页用「平台代检」跑一次（NVD / CISA KEV），由平台真实请求并落下命中条目")
+		} else {
+			v.note("撞车比对已由平台代执行 %d 次检索（命中条目已落库，可逐条复核）", platformProbes)
+		}
 	}
 
 	// 门三：触发验证（无 PoC 不算 finding）。

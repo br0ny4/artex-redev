@@ -692,6 +692,16 @@ export const api = {
     del<{ deleted: boolean }>(`/exploration/findings/${encodeURIComponent(id)}/gate/counterexamples/${ceid}`),
   addFindingNoveltyCheck: (id: string, body: Omit<GateNoveltyCheck, "id">) =>
     post<FindingGate>(`/exploration/findings/${encodeURIComponent(id)}/gate/novelty`, body),
+  // 平台代执行撞车检索：真的请求 NVD / CISA KEV，命中条目落库（origin=platform）。
+  // 全部检索失败会返回 502，不会落"干净"记录（查不动 ≠ 没撞车）。
+  probeFindingNovelty: (id: string, queries: string[]) =>
+    post<{
+      results: unknown[];
+      checks: GateNoveltyCheck[];
+      errors: { source: string; query: string; error: string }[];
+      gate: GateVerdict;
+      requirements: FindingGateRequirements;
+    }>(`/exploration/findings/${encodeURIComponent(id)}/gate/novelty/probe`, { queries }),
   deleteFindingNoveltyCheck: (id: string, nid: number) =>
     del<{ deleted: boolean }>(`/exploration/findings/${encodeURIComponent(id)}/gate/novelty/${nid}`),
   setFindingPoc: (id: string, body: GatePoc) =>

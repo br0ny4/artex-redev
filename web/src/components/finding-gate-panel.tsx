@@ -184,8 +184,23 @@ export function FindingGatePanel({ findingId, readOnly = false }: { findingId: s
         items={gate.novelty_checks ?? []}
         readOnly={readOnly}
         busy={busy === "nv"}
+        probeBusy={busy === "probe"}
         onAdd={(n) => run("nv", () => api.addFindingNoveltyCheck(findingId, n))}
         onDelete={(id) => run("nv", () => api.deleteFindingNoveltyCheck(findingId, id))}
+        onProbe={(queries) =>
+          run("probe", async () => {
+            const r = await api.probeFindingNovelty(findingId, queries);
+            const hits = (r.checks ?? []).reduce((n, c) => n + (c.hits?.length ?? 0), 0);
+            const failed = r.errors?.length ?? 0;
+            if (hits > 0) {
+              toast.warning(`平台代检完成：${r.checks.length} 条记录、命中 ${hits} 条公开条目，请逐条复核是否同一漏洞`);
+            } else if (failed > 0) {
+              toast.warning(`平台代检部分失败（${failed} 个源）：已记录成功的检索结果，失败的不算"没撞车"`);
+            } else {
+              toast.success(`平台代检完成：${r.checks.length} 条记录，未命中公开条目`);
+            }
+          })
+        }
       />
     </div>
   );
@@ -524,16 +539,25 @@ function NoveltySection({
   items,
   readOnly,
   busy,
+  probeBusy,
   onAdd,
   onDelete,
+  onProbe,
 }: {
   items: GateNoveltyCheck[];
   readOnly: boolean;
   busy: boolean;
+  probeBusy: boolean;
   onAdd: (n: { query: string; source_class: string; hits: string[]; same_vuln: boolean }) => void;
   onDelete: (id: number) => void;
+  onProbe: (queries: string[]) => void;
 }) {
   const [form, setForm] = React.useState({ query: "", source_class: "cve", hits: "", same_vuln: false });
+  const [probe, setProbe] = React.useState("");
+  const probeQueries = probe
+    .split("\n")
+    .map((s) => s.trim())
+    .filter(Boolean);
   return (
     <Card>
       <CardHeader>
@@ -552,6 +576,9 @@ function NoveltySection({
                   ? "撞车"
                   : (SOURCE_CLASSES.find((s) => s.value === n.source_class)?.label ?? n.source_class)}
               </Badge>
+              <Badge variant="secondary" className="mt-0.5 shrink-0">
+                {n.origin === "platform" ? "平台代检" : "人工登记"}
+              </Badge>
               <div className="flex min-w-0 flex-1 flex-col gap-0.5 text-xs">
                 <span className="font-medium break-all">{n.query}</span>
                 {n.hits?.length ? <span className="text-muted-foreground">命中：{n.hits.join(" / ")}</span> : null}
@@ -564,6 +591,35 @@ function NoveltySection({
             </div>
           ))}
         </div>
+        {!readOnly ? (
+          <div className="flex flex-col gap-2 rounded-md border border-dashed p-2.5">
+            <div className="flex flex-col gap-1">
+              <span className="text-sm font-medium">平台代检（真实请求 NVD / CISA KEV）</span>
+              <span className="text-xs text-muted-foreground">
+                每行一条查询（最多 5 条），建议写"产品 + 版本 +
+                漏洞特征"。平台会把命中的公开条目落库并标注「平台代检」；
+                是否同一个漏洞仍要你复核后手动标记撞车。检索失败不会记成"没撞车"。
+              </span>
+            </div>
+            <Textarea
+              rows={3}
+              className="font-mono text-xs"
+              placeholder={"apache httpd 2.4.49 path traversal\nlog4j2 jndi rce"}
+              value={probe}
+              onChange={(e) => setProbe(e.target.value)}
+            />
+            <div className="flex justify-end">
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={busy || probeBusy || probeQueries.length === 0 || probeQueries.length > 5}
+                onClick={() => onProbe(probeQueries)}
+              >
+                {probeBusy ? <Spinner /> : <ShieldCheckIcon className="size-3.5" />} 平台代检
+              </Button>
+            </div>
+          </div>
+        ) : null}
         {!readOnly ? (
           <div className="flex flex-col gap-2 rounded-md border p-2.5">
             <div className="grid gap-2 sm:grid-cols-2">

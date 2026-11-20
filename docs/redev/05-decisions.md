@@ -140,6 +140,7 @@
 | 域包级部署上下文必填项（`engagement_requirements`，离线域不要求测试账号） | ✅ | `policy/config.go` |
 | 策略状态进仪表盘：顶部停止横幅、规范执行（pack/状态）、近 100 条判定拦截数 | ✅ | `web/src/app/(main)/dashboard/page.tsx` |
 | L3 出口端到端：真实代理拦截（403 + X-ArtEx-Policy + 落索引，未发包） | ✅ | `traffic/policy_e2e_test.go` |
+| 门二机器证据：平台代执行检索（NVD + CISA KEV，命中条目落库 origin=platform，同一漏洞判定仍人工） | ✅ | `novelty/`、`server/finding_novelty_probe.go` |
 | 门三机器证据：平台代执行重放（经录制代理发包、机器判定、复现次数按实测抬高、回填真实流量 id；仅 http） | ✅ | `vulngate/replay.go`、`server/finding_poc_replay.go` |
 | **未做**：合规矩阵其余端到端（响应截断/预算/挂起全链路） | ⬜ | 下一个切片 |
 

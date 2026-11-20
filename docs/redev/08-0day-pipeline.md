@@ -1,7 +1,8 @@
 # 0day 流水线与三道准入门的工程设计
 
 > 状态：门一（反例验证）、门二（撞车比对）、门三（触发验证/PoC）已实现并强制在导出
-> 出口；门三支持由平台代执行重放（`kind=http`），复现次数由机器累加；流水线其余环节逐步接入。代码：`vulngate/`（判定）、`db/finding_gate.go`（存取）、
+> 出口；门二支持平台代执行检索（NVD / CISA KEV），门三支持平台代执行重放（`kind=http`），
+> 证据由机器产生；流水线其余环节逐步接入。代码：`vulngate/`（判定）、`db/finding_gate.go`（存取）、
 > `server/finding_gate.go`（接口与导出拦截）。
 
 ## 1. 目标
@@ -100,6 +101,22 @@
 - 任何 `same_vuln=true` **直接阻断**并带上命中编号（如 `CVE-2026-99999`），
   因为重复提交是负资产。
 
+#### 平台代执行检索（`POST /api/exploration/findings/{id}/gate/novelty/probe`）
+
+人工登记的 query/hits 只能证明"agent 说它查过"。平台代检把这一步也变成机器事实：
+
+- 内置两个免鉴权源：**NVD**（`source_class=cve`，`keywordSearch` 全文检索）与
+  **CISA KEV**（`source_class=advisory`，已知被利用漏洞目录，进程内缓存 6 小时，
+  关键词 AND 过滤）。两者恰好覆盖门二要求的"≥2 类信息源"。
+- 平台**只负责查与记**：命中条目（编号 + 标题 + 可核对链接）原样落库，标记
+  `origin=platform`；"是不是同一个漏洞"**故意不自动判定**——机器猜错会放过重复项，
+  也可能把真 0day 判成重复。操作员复核后手动标记 `same_vuln`。
+- **查不动 ≠ 没撞车**：某个源失败时不落"干净"记录，失败原因在响应的 `errors` 里带出；
+  全部源都失败直接 502。把超时写成"未命中"是最危险的假证据。
+- 一次最多 5 条查询、每条至少 3 个字符：撞车比对靠准确关键词，不是把产品名丢给库。
+- `gate.notes` 会注明"撞车比对已由平台代执行 N 次检索"或"目前只有人工登记记录"，
+  不额外阻断（离线域/内网环境检索不到公网），但报告评审时一眼能看出证据成色。
+
 ## 4. 接口
 
 ```bash
@@ -112,10 +129,15 @@ curl -X POST -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/jso
   -d '{"claim":"未登录访问同一接口","method":"去掉会话 Cookie 重放","expected":"返回 401 且不含用户数据","observed":"返回 401，body 为空","passed":true,"evidence":"traffic: a1b2c3"}' \
   http://127.0.0.1:8787/api/exploration/findings/12/gate/counterexamples
 
-# 记一次撞车比对
+# 记一次撞车比对（人工登记）
 curl -X POST -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
   -d '{"query":"ACME Gateway 4.2 RCE","source_class":"cve","hits":[],"same_vuln":false}' \
   http://127.0.0.1:8787/api/exploration/findings/12/gate/novelty
+
+# 平台代执行撞车检索：真的请求 NVD / CISA KEV，命中条目落库（origin=platform）
+curl -X POST -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"queries":["acme gateway 4.2 rce","acme gateway authentication bypass"]}' \
+  http://127.0.0.1:8787/api/exploration/findings/12/gate/novelty/probe
 
 # 写触发验证（PoC），reproduced 至少 2；带 expect_status 的 http PoC 可让平台代跑重放
 curl -X PUT -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
@@ -154,8 +176,10 @@ HTTP 409
 1. **凭据核对只覆盖显式 `traffic_ids`**：反例可以引用 `traffic_ids`，服务端会核对它们
    确实存在于流量索引（编造的 id 返回 400）；但 `evidence` 自由文本里的 id 不做解析，
    且尚未**强制**在线域必须引用真实流量。
-2. **撞车检索未由平台代为执行**：目前是记录 agent/操作员实际做过的检索。若接入可用的
-   检索 MCP，可改为平台侧执行并自动落 `hits`，进一步压缩"假装查过"的空间。
+2. **平台代检只覆盖两个免鉴权源**：NVD + CISA KEV 已能证明"查过、结果是这样"，但
+   GitHub issue、厂商公告、搜索引擎仍需人工登记（这些源要么要 token，要么防抓取）。
+   覆盖面上限取决于接入的源；下一步是接可配置的检索 MCP，并让"是否同一个漏洞"的
+   复核结果也留痕（谁复核的、依据哪条命中）。
 3. **重放只覆盖 `kind=http`**：平台已能代跑 HTTP PoC 并逐次判定、回填真实流量，但
    `command`/`file`/`sample` 类 PoC 仍在宿主机由人/agent 执行（平台刻意不代跑）。
    代价是这几类"真的跑过吗"仍靠自觉；下一步是把沙箱执行结果也纳入机器证据

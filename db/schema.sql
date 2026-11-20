@@ -1459,6 +1459,9 @@ CREATE TABLE IF NOT EXISTS finding_novelty_checks (
     created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_finding_novelty_finding ON finding_novelty_checks(finding_id, id);
+-- origin：这条检索记录是人工/agent 登记（manual）还是平台代执行（platform）。
+-- 平台记录意味着平台真的请求了公开漏洞库并落下了返回条目，可逐条复核。
+ALTER TABLE finding_novelty_checks ADD COLUMN IF NOT EXISTS origin TEXT NOT NULL DEFAULT 'manual';
 
 -- 门三：触发验证（PoC）。一条 finding 只保留最新一份（写了新的覆盖旧的），
 -- 因为"能复现的触发方式"应当是收敛的结论，而不是一堆尝试记录。

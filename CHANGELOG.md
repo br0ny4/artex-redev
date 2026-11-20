@@ -18,6 +18,10 @@
   - 强制点在导出出口：未过门的 finding 导出返回 409 并逐条给出原因；`force=1&reason=…` 可逐次放行并记日志，
     `ARTEX_FINDING_GATE=off` 是迁移旧数据的逃生口。
   - 反例凭据可引用 `traffic_ids`：录入时服务端核对流量索引，编造的 id 直接 400。
+  - **门二机器证据：平台代执行检索**。`POST /api/exploration/findings/{id}/gate/novelty/probe` 由平台真的
+    请求 NVD（CVE 库）与 CISA KEV（已知被利用目录），命中条目（编号+标题+链接）落库并标记 `origin=platform`；
+    是否"同一个漏洞"仍由操作员复核后手动标记（机器猜错两个方向都危险）。某个源失败不会落"没撞车"记录，
+    全部失败返回 502；`gate.notes` 注明"平台代执行 N 次检索"或"只有人工登记"。
   - **门三机器证据：平台代执行重放**。PoC 可带 `expect_status` / `expect_body_contains`，`POST
     /api/exploration/findings/{id}/gate/poc/replay` 由平台经录制代理真实发包（仍受 L3 范围/语义/预算管控），
     自动判定是否与预期一致；一致时把 `reproduced` 抬到机器实测值并回填 `observed`/`evidence`（真实流量 id），
@@ -37,6 +41,9 @@
 - **PoC 平台重放**：带机器可判预期的 PoC 两次重放后复现次数由机器抬到 2、证据换成真实流量 id；
   重放结果不一致时不计数、不覆盖人工 `observed`；`kind=command` / 缺 `expect_status` / 坏请求行分别 400
   （`vulngate/replay_test.go` + `server/finding_poc_replay_test.go`）。
+- **撞车比对平台代检**：命中条目带编号与链接落库、`origin=platform`、门二统计与 notes 正确；
+  全部检索失败 502 且不写记录；部分失败仍记录成功项并带出失败源；空查询/超 5 条 400
+  （`novelty/novelty_test.go` + `server/finding_novelty_probe_test.go`）。
 - **L3 出口端到端验收**（`traffic/policy_e2e_test.go`）：起真实录制代理，把请求交给代理，
   断言范围外目标返回 403 + `X-ArtEx-Policy`、阻断说明含"平台管控"、尝试进了流量索引。
   用不存在的 `.invalid` 域名做目标：若代理把请求转发出去过，会得到 502 而不是 403——

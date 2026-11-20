@@ -1732,6 +1732,8 @@ export interface GateNoveltyCheck {
   source_class: string;
   hits: string[];
   same_vuln: boolean;
+  // manual = 人/agent 登记；platform = 平台代执行检索（真的请求了公开漏洞库并落下命中）。
+  origin?: "manual" | "platform";
 }
 
 export interface GatePoc {
@@ -1768,6 +1770,7 @@ export interface GateVerdict {
   poc_reproductions: number;
   poc_replays?: number;
   poc_replay_matched?: number;
+  novelty_platform?: number;
   notes?: string[];
 }
 

@@ -792,6 +792,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/exploration/findings/{id}/gate/poc/replay", s.replayFindingPoc)
 	mux.HandleFunc("POST /api/exploration/findings/{id}/gate/novelty", s.addFindingNoveltyCheck)
 	mux.HandleFunc("DELETE /api/exploration/findings/{id}/gate/novelty/{nid}", s.deleteFindingNoveltyCheck)
+	mux.HandleFunc("POST /api/exploration/findings/{id}/gate/novelty/probe", s.probeFindingNovelty)
 	mux.HandleFunc("POST /api/exploration/findings/{id}/deepen", s.deepenFinding)
 	mux.HandleFunc("GET /api/exploration/findings/{id}/retests", s.listFindingRetests)
 	mux.HandleFunc("GET /api/exploration/findings/retests/active", s.listActiveFindingRetests)

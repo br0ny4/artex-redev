@@ -94,9 +94,9 @@ func (d *DB) AddFindingNoveltyCheck(ctx context.Context, findingID int64, n vuln
 		return n, sql.ErrNoRows
 	}
 	err = d.QueryRowContext(ctx, `
-		INSERT INTO finding_novelty_checks (finding_id, query, source_class, hits, same_vuln)
-		VALUES ($1,$2,$3,$4,$5) RETURNING id`,
-		findingID, n.Query, n.SourceClass, string(hits), n.SameVuln).Scan(&n.ID)
+		INSERT INTO finding_novelty_checks (finding_id, query, source_class, hits, same_vuln, origin)
+		VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`,
+		findingID, n.Query, n.SourceClass, string(hits), n.SameVuln, noveltyOrigin(n.Origin)).Scan(&n.ID)
 	return n, err
 }
 
@@ -115,7 +115,7 @@ func (d *DB) DeleteFindingNoveltyCheck(ctx context.Context, findingID, id int64)
 // ListFindingNoveltyChecks 按写入顺序返回一条 finding 的撞车比对。
 func (d *DB) ListFindingNoveltyChecks(ctx context.Context, findingID int64) ([]vulngate.NoveltyCheck, error) {
 	rows, err := d.QueryContext(ctx, `
-		SELECT id, query, source_class, hits, same_vuln
+		SELECT id, query, source_class, hits, same_vuln, origin
 		FROM finding_novelty_checks WHERE finding_id=$1 ORDER BY id`, findingID)
 	if err != nil {
 		return nil, err
@@ -125,7 +125,7 @@ func (d *DB) ListFindingNoveltyChecks(ctx context.Context, findingID int64) ([]v
 	for rows.Next() {
 		var n vulngate.NoveltyCheck
 		var hits string
-		if err := rows.Scan(&n.ID, &n.Query, &n.SourceClass, &hits, &n.SameVuln); err != nil {
+		if err := rows.Scan(&n.ID, &n.Query, &n.SourceClass, &hits, &n.SameVuln, &n.Origin); err != nil {
 			return nil, err
 		}
 		_ = json.Unmarshal([]byte(hits), &n.Hits)
@@ -192,7 +192,7 @@ func (d *DB) FindingGateVerdicts(ctx context.Context, ids []int64) (map[int64]vu
 
 	nov := map[int64][]vulngate.NoveltyCheck{}
 	rows, err = d.QueryContext(ctx, `
-		SELECT finding_id, id, query, source_class, hits, same_vuln
+		SELECT finding_id, id, query, source_class, hits, same_vuln, origin
 		FROM finding_novelty_checks WHERE finding_id = ANY($1) ORDER BY finding_id, id`, ids)
 	if err != nil {
 		return nil, err
@@ -201,7 +201,7 @@ func (d *DB) FindingGateVerdicts(ctx context.Context, ids []int64) (map[int64]vu
 		var fid int64
 		var n vulngate.NoveltyCheck
 		var hits string
-		if err := rows.Scan(&fid, &n.ID, &n.Query, &n.SourceClass, &hits, &n.SameVuln); err != nil {
+		if err := rows.Scan(&fid, &n.ID, &n.Query, &n.SourceClass, &hits, &n.SameVuln, &n.Origin); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -448,4 +448,16 @@ func (d *DB) UpdateFindingPocVerification(ctx context.Context, findingID int64, 
 		return sql.ErrNoRows
 	}
 	return nil
+}
+
+// noveltyOrigin 归一化检索记录的来源标记（只认 manual / platform）。
+func noveltyOrigin(o string) string {
+	switch o {
+	case "platform":
+		return "platform"
+	case "manual", "":
+		return "manual"
+	default:
+		return "manual"
+	}
 }
