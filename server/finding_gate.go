@@ -30,6 +30,7 @@ func gateRequirements() map[string]any {
 		"min_counterexamples": vulngate.MinCounterexamples,
 		"min_novelty_queries": vulngate.MinNoveltyQueries,
 		"min_source_classes":  vulngate.MinSourceClasses,
+		"min_reproductions":   vulngate.MinReproductions,
 		"source_classes":      []string{"cve", "vendor", "github", "advisory", "search", "other"},
 	}
 }
@@ -51,6 +52,7 @@ func (s *Server) getFindingGate(w http.ResponseWriter, r *http.Request) {
 		"gate":            vulngate.Assess(a),
 		"counterexamples": a.Counterexamples,
 		"novelty_checks":  a.Novelty,
+		"poc":             a.Poc,
 		"requirements":    gateRequirements(),
 	})
 }
@@ -231,8 +233,8 @@ func (s *Server) enforceFindingGate(w http.ResponseWriter, r *http.Request, fs [
 		return true
 	}
 	writeJSON(w, http.StatusConflict, map[string]any{
-		"error": "导出被 0day 准入拦下：每条结论都需要 ≥5 条反例验证与 ≥3 次跨源撞车比对。" +
-			"补齐后可重试；确需跳过用 force=1&reason=…（会记日志）。",
+		"error": "导出被 0day 准入拦下：每条结论都需要一条可复现的 PoC（≥2 次连续复现）、" +
+			"≥5 条反例验证与 ≥3 次跨源撞车比对。补齐后可重试；确需跳过用 force=1&reason=…（会记日志）。",
 		"blocked":      blocked,
 		"requirements": gateRequirements(),
 	})
@@ -245,4 +247,72 @@ func strconvInt64(s string) int64 {
 		return n
 	}
 	return 0
+}
+
+// setFindingPoc 写入/覆盖触发验证记录（门三）。为什么允许覆盖而不是追加：
+// "能复现的触发方式"应当是收敛结论；保留历史尝试没有审计价值，反而会让报告出现多份
+// 互相矛盾的 PoC。
+func (s *Server) setFindingPoc(w http.ResponseWriter, r *http.Request) {
+	id := int64(atoiDefault(r.PathValue("id"), 0))
+	if id <= 0 {
+		writeErr(w, 400, "bad finding id")
+		return
+	}
+	var p struct {
+		Kind       string `json:"kind"`
+		Input      string `json:"input"`
+		Expected   string `json:"expected"`
+		Observed   string `json:"observed"`
+		Reproduced int    `json:"reproduced"`
+		Evidence   string `json:"evidence"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&p); err != nil {
+		writeErr(w, 400, "解析请求失败: "+err.Error())
+		return
+	}
+	var missing []string
+	for _, f := range []struct{ name, val string }{
+		{"kind", p.Kind}, {"input", p.Input}, {"observed", p.Observed}, {"evidence", p.Evidence},
+	} {
+		if strings.TrimSpace(f.val) == "" {
+			missing = append(missing, f.name)
+		}
+	}
+	if len(missing) > 0 {
+		writeErr(w, 400, "触发验证记录缺少字段: "+strings.Join(missing, ", ")+
+			"（kind=触发方式, input=可复制粘贴的复现步骤, observed=实际观察结果, evidence=流量 id/命令输出）")
+		return
+	}
+	poc, err := s.m.pg.UpsertFindingPoc(r.Context(), id, vulngate.Poc{
+		Kind: strings.ToLower(strings.TrimSpace(p.Kind)), Input: p.Input, Expected: p.Expected,
+		Observed: p.Observed, Reproduced: p.Reproduced, Evidence: p.Evidence,
+	})
+	if err != nil {
+		if err == db.ErrFindingNotFound {
+			writeErr(w, 404, "finding not found")
+			return
+		}
+		writeErr(w, 500, err.Error())
+		return
+	}
+	a, err := s.m.pg.FindingGateAssessment(r.Context(), id)
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]any{"poc": poc, "gate": vulngate.Assess(a), "requirements": gateRequirements()})
+}
+
+// deleteFindingPoc 撤回触发验证记录。
+func (s *Server) deleteFindingPoc(w http.ResponseWriter, r *http.Request) {
+	id := int64(atoiDefault(r.PathValue("id"), 0))
+	if id <= 0 {
+		writeErr(w, 400, "bad finding id")
+		return
+	}
+	if err := s.m.pg.DeleteFindingPoc(r.Context(), id); err != nil {
+		writeErr(w, 404, "poc not found")
+		return
+	}
+	writeJSON(w, 200, map[string]any{"deleted": true})
 }

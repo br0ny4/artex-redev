@@ -66,8 +66,8 @@ func findingWorkflowTools(agentKey string, tools []actool.CoreTool) ([]actool.Co
 	guidance := ""
 	if has["report_finding"] {
 		guidance += "\n\n**0day 准入（导出前强制）**：report_finding 只是登记候选，不等于可交付结论。" +
-			"提交前该 finding 必须有 ≥5 条**反例**（阴性对照：换变体输入/降级条件/对照环境，漏洞必须不出现）和 ≥3 次覆盖 ≥2 类信息源（CVE 库、厂商公告、代码托管、漏洞库）的**撞车比对**（查是否已被公开）。" +
-			"因此上报时请在 evidence 里同时写清：每条反例的 claim（排除哪条误报路径）、method（怎么验的）、expected（正常应观察到什么）、observed（实际观察到什么）；以及撞车检索用的关键词、来源类别、是否命中同类漏洞。" +
+			"提交前该 finding 必须有一份**可复现的 PoC**（触发方式 + 可复制粘贴的输入 + 实际观察结果 + 至少 2 次连续复现，无 PoC 不算 finding）、≥5 条**反例**（阴性对照：换变体输入/降级条件/对照环境，漏洞必须不出现）和 ≥3 次覆盖 ≥2 类信息源（CVE 库、厂商公告、代码托管、漏洞库）的**撞车比对**（查是否已被公开）。" +
+			"因此上报时请在 evidence 里同时写清：PoC 的触发输入与实际结果、连续复现次数；每条反例的 claim（排除哪条误报路径）、method（怎么验的）、expected（正常应观察到什么）、observed（实际观察到什么）；以及撞车检索用的关键词、来源类别、是否命中同类漏洞。" +
 			"这些记录由操作员在准入接口登记；未过门的 finding 导出报告会被 409 拦下。不要声称做过未真正执行的验证。"
 	}
 	if has["report_finding"] || has["add_task_hint"] || has["add_hint"] {

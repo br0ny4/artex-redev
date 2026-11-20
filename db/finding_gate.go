@@ -137,6 +137,9 @@ func (d *DB) FindingGateAssessment(ctx context.Context, findingID int64) (vulnga
 	if a.Novelty, err = d.ListFindingNoveltyChecks(ctx, findingID); err != nil {
 		return a, err
 	}
+	if a.Poc, err = d.GetFindingPoc(ctx, findingID); err != nil {
+		return a, err
+	}
 	return a, nil
 }
 
@@ -200,8 +203,12 @@ func (d *DB) FindingGateVerdicts(ctx context.Context, ids []int64) (map[int64]vu
 		return nil, err
 	}
 
+	pocs, err := d.loadPocs(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
 	for _, id := range ids {
-		out[id] = vulngate.Assess(vulngate.Assessment{Counterexamples: ces[id], Novelty: nov[id]})
+		out[id] = vulngate.Assess(vulngate.Assessment{Counterexamples: ces[id], Novelty: nov[id], Poc: pocs[id]})
 	}
 	return out, nil
 }
@@ -247,4 +254,77 @@ func FormatGateReasons(reasons []string) string {
 		out += fmt.Sprintf("%d) %s", i+1, r)
 	}
 	return out
+}
+
+// UpsertFindingPoc 写入/覆盖一条 finding 的触发验证记录（一条 finding 只保留最新一份）。
+func (d *DB) UpsertFindingPoc(ctx context.Context, findingID int64, p vulngate.Poc) (vulngate.Poc, error) {
+	if findingID <= 0 {
+		return p, errors.New("finding_id 必须为正")
+	}
+	var exists bool
+	if err := d.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM findings WHERE id=$1)`, findingID).Scan(&exists); err != nil {
+		return p, err
+	}
+	if !exists {
+		return p, sql.ErrNoRows
+	}
+	_, err := d.ExecContext(ctx, `
+		INSERT INTO finding_pocs (finding_id, kind, input, expected, observed, reproduced, evidence)
+		VALUES ($1,$2,$3,$4,$5,$6,$7)
+		ON CONFLICT (finding_id) DO UPDATE SET
+			kind=EXCLUDED.kind, input=EXCLUDED.input, expected=EXCLUDED.expected,
+			observed=EXCLUDED.observed, reproduced=EXCLUDED.reproduced,
+			evidence=EXCLUDED.evidence, updated_at=now()`,
+		findingID, p.Kind, p.Input, p.Expected, p.Observed, p.Reproduced, p.Evidence)
+	return p, err
+}
+
+// GetFindingPoc 返回一条 finding 的触发验证记录；没有时返回 (nil, nil)。
+func (d *DB) GetFindingPoc(ctx context.Context, findingID int64) (*vulngate.Poc, error) {
+	var p vulngate.Poc
+	err := d.QueryRowContext(ctx, `
+		SELECT kind, input, expected, observed, reproduced, evidence
+		FROM finding_pocs WHERE finding_id=$1`, findingID).
+		Scan(&p.Kind, &p.Input, &p.Expected, &p.Observed, &p.Reproduced, &p.Evidence)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &p, nil
+}
+
+// DeleteFindingPoc 删除触发验证记录（PoC 会随 finding 级联删除，这里用于主动撤回）。
+func (d *DB) DeleteFindingPoc(ctx context.Context, findingID int64) error {
+	res, err := d.ExecContext(ctx, `DELETE FROM finding_pocs WHERE finding_id=$1`, findingID)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
+// loadPocs 是批量评估用的 PoC 预取。
+func (d *DB) loadPocs(ctx context.Context, ids []int64) (map[int64]*vulngate.Poc, error) {
+	out := map[int64]*vulngate.Poc{}
+	rows, err := d.QueryContext(ctx, `
+		SELECT finding_id, kind, input, expected, observed, reproduced, evidence
+		FROM finding_pocs WHERE finding_id = ANY($1)`, ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var fid int64
+		var p vulngate.Poc
+		if err := rows.Scan(&fid, &p.Kind, &p.Input, &p.Expected, &p.Observed, &p.Reproduced, &p.Evidence); err != nil {
+			return nil, err
+		}
+		pp := p
+		out[fid] = &pp
+	}
+	return out, rows.Err()
 }

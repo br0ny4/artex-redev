@@ -18,6 +18,11 @@ func okCounterexamples(n int) []Counterexample {
 	return out
 }
 
+func okPoc() *Poc {
+	return &Poc{Kind: "http", Input: "curl -X POST https://target/api/order -d '{\"id\":1}'",
+		Expected: "返回他人订单", Observed: "返回他人订单内容", Reproduced: 3, Evidence: "traffic: 7f3a"}
+}
+
 func okNovelty(n int) []NoveltyCheck {
 	classes := []string{"cve", "vendor", "github", "search"}
 	out := make([]NoveltyCheck, 0, n)
@@ -28,11 +33,11 @@ func okNovelty(n int) []NoveltyCheck {
 }
 
 func TestAssessPassesWhenBothGatesSatisfied(t *testing.T) {
-	v := Assess(Assessment{Counterexamples: okCounterexamples(5), Novelty: okNovelty(3)})
+	v := Assess(Assessment{Counterexamples: okCounterexamples(5), Novelty: okNovelty(3), Poc: okPoc()})
 	if !v.Passed() {
 		t.Fatalf("应放行，reasons=%v", v.Reasons)
 	}
-	if v.DistinctVectors != 5 || v.NoveltyQueries != 3 {
+	if v.DistinctVectors != 5 || v.NoveltyQueries != 3 || v.PocReproductions != 3 {
 		t.Fatalf("统计不对：%+v", v)
 	}
 }
@@ -122,12 +127,43 @@ func TestAssessDedupsIdenticalQueries(t *testing.T) {
 	}
 }
 
+func TestAssessBlocksWithoutPoc(t *testing.T) {
+	v := Assess(Assessment{Counterexamples: okCounterexamples(5), Novelty: okNovelty(3)})
+	if v.Passed() {
+		t.Fatal("没有 PoC 不算 finding")
+	}
+	if !strings.Contains(strings.Join(v.Reasons, "; "), "触发验证缺失") {
+		t.Fatalf("原因应说明缺 PoC：%v", v.Reasons)
+	}
+}
+
+func TestAssessBlocksOnLowReproductions(t *testing.T) {
+	p := okPoc()
+	p.Reproduced = 1
+	v := Assess(Assessment{Counterexamples: okCounterexamples(5), Novelty: okNovelty(3), Poc: p})
+	if v.Passed() {
+		t.Fatal("只复现一次不该放行")
+	}
+	if !strings.Contains(strings.Join(v.Reasons, "; "), "复现次数不足") {
+		t.Fatalf("原因应说明复现不足：%v", v.Reasons)
+	}
+}
+
+func TestAssessBlocksOnIncompletePoc(t *testing.T) {
+	p := okPoc()
+	p.Input = ""
+	v := Assess(Assessment{Counterexamples: okCounterexamples(5), Novelty: okNovelty(3), Poc: p})
+	if v.Passed() || !strings.Contains(strings.Join(v.Reasons, "; "), "input") {
+		t.Fatalf("缺输入应阻断：%v", v.Reasons)
+	}
+}
+
 func TestVerdictJSONShape(t *testing.T) {
 	v := Assess(Assessment{})
 	if v.State != StateBlocked {
 		t.Fatalf("空记录必须是 blocked，得到 %q", v.State)
 	}
-	if len(v.Reasons) < 2 {
-		t.Fatalf("应同时报出两道门的问题，得到 %v", v.Reasons)
+	if len(v.Reasons) < 3 {
+		t.Fatalf("应同时报出三道门的问题，得到 %v", v.Reasons)
 	}
 }

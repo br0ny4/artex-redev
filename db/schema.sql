@@ -1456,3 +1456,17 @@ CREATE TABLE IF NOT EXISTS finding_novelty_checks (
     created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_finding_novelty_finding ON finding_novelty_checks(finding_id, id);
+
+-- 门三：触发验证（PoC）。一条 finding 只保留最新一份（写了新的覆盖旧的），
+-- 因为"能复现的触发方式"应当是收敛的结论，而不是一堆尝试记录。
+CREATE TABLE IF NOT EXISTS finding_pocs (
+    finding_id BIGINT PRIMARY KEY REFERENCES findings(id) ON DELETE CASCADE,
+    kind       TEXT NOT NULL DEFAULT '',  -- http | command | file | sample
+    input      TEXT NOT NULL DEFAULT '',  -- 复现步骤（可复制粘贴）
+    expected   TEXT NOT NULL DEFAULT '',  -- 预期表现
+    observed   TEXT NOT NULL DEFAULT '',  -- 实际观察结果
+    reproduced INT NOT NULL DEFAULT 0,    -- 连续复现成功次数
+    evidence   TEXT NOT NULL DEFAULT '',  -- 流量 id / 命令输出摘要
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);

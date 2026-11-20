@@ -6,21 +6,25 @@
 
 ### 新增
 
-- **0day 准入门（两条机制）**：
+- **0day 准入门（三道门，门三为本次新增）**：
   - **门一 · 反例验证**：每条候选漏洞必须积累 ≥5 条通过的反例（阴性对照）——变体输入/降级条件/对照环境，
     每条要写清要排除的误报路径、验证手法、预期与实际观察、可核对凭据；`method|claim` 归一化去重，
     5 条副本不算 5 条反例；有任一条未通过即阻断。
   - **门二 · 撞车比对**：提交前 ≥3 次不同检索、覆盖 ≥2 类信息源（CVE/厂商公告/代码托管/漏洞库/搜索引擎），
     命中已公开的同一致命漏洞即阻断，并带出命中编号。
+  - **门三 · 触发验证（PoC）**：**无 PoC 不算 finding**。必须写一份可复制粘贴的触发输入
+    （`kind`/`input`/`observed`/`evidence`）且连续复现 ≥2 次——一次成功可能是缓存、时序或残留状态；
+    一条 finding 只保留最新一份 PoC（覆盖式写入，避免报告里出现多份互相矛盾的"能复现"）。
   - 强制点在导出出口：未过门的 finding 导出返回 409 并逐条给出原因；`force=1&reason=…` 可逐次放行并记日志，
     `ARTEX_FINDING_GATE=off` 是迁移旧数据的逃生口。
   - 接口：`GET /api/exploration/findings/{id}/gate`、`POST …/gate/counterexamples`、
-    `POST …/gate/novelty`（均支持撤回删除）；判定逻辑在纯 Go 包 `vulngate/`，可单测。设计见
+    `POST …/gate/novelty`、`PUT …/gate/poc`（均支持撤回删除）；判定逻辑在纯 Go 包 `vulngate/`，可单测。设计见
     [`docs/redev/08-0day-pipeline.md`](docs/redev/08-0day-pipeline.md)。
 
 ### 测试
 
-- **0day 准入端到端**：反例不足挡、5 条副本挡、撞车挡（带编号）、两门齐才放行、导出 409 与 force 行为。
+- **0day 准入端到端**：反例不足挡、5 条副本挡、撞车挡（带编号）、缺 PoC 挡、只复现 1 次挡、
+  三门齐才放行、导出 409 与 force 行为（`vulngate` 10 个单测 + `server/finding_gate_test.go`）。
 - **L3 出口端到端验收**（`traffic/policy_e2e_test.go`）：起真实录制代理，把请求交给代理，
   断言范围外目标返回 403 + `X-ArtEx-Policy`、阻断说明含"平台管控"、尝试进了流量索引。
   用不存在的 `.invalid` 域名做目标：若代理把请求转发出去过，会得到 502 而不是 403——

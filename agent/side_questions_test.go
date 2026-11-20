@@ -10,10 +10,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/br0ny4/artex-redev/db"
-	"github.com/br0ny4/artex-redev/sidequestion"
 	"github.com/Autumn-27/norma/llm"
 	"github.com/Autumn-27/norma/transcript"
+	"github.com/br0ny4/artex-redev/db"
+	"github.com/br0ny4/artex-redev/sidequestion"
 )
 
 type sideAgentProvider struct {

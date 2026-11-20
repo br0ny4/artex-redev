@@ -4,13 +4,13 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/br0ny4/artex-redev/db"
-	"github.com/br0ny4/artex-redev/intercept"
 	"github.com/Autumn-27/norma/agentcore"
 	"github.com/Autumn-27/norma/llm"
 	"github.com/Autumn-27/norma/permission"
 	actool "github.com/Autumn-27/norma/tool"
 	"github.com/Autumn-27/norma/transcript"
+	"github.com/br0ny4/artex-redev/db"
+	"github.com/br0ny4/artex-redev/intercept"
 )
 
 // MainAgent is the thin human-interface orchestrator (docs §4.2 / §7). The human

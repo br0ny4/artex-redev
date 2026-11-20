@@ -68,8 +68,9 @@ func TestFindingGateBlocksUntilBothGatesSatisfied(t *testing.T) {
 	}
 	w = req("GET", fmt.Sprintf("/api/exploration/findings/%d/gate", fid), "")
 	_ = json.Unmarshal(w.Body.Bytes(), &g)
-	if g.Gate.State != "blocked" || !strings.Contains(strings.Join(g.Gate.Reasons, "; "), "撞车比对不足") {
-		t.Fatalf("门一过后应只剩撞车门挡着：%v", g.Gate.Reasons)
+	reasons := strings.Join(g.Gate.Reasons, "; ")
+	if g.Gate.State != "blocked" || !strings.Contains(reasons, "撞车比对不足") || !strings.Contains(reasons, "触发验证缺失") {
+		t.Fatalf("门一过后应只剩撞车门与触发验证挡着：%v", g.Gate.Reasons)
 	}
 
 	// 撞车：同一漏洞已公开 → 立刻 blocked，且原因带编号。
@@ -124,20 +125,38 @@ func TestFindingGatePassesAndAllowsExport(t *testing.T) {
 			t.Fatalf("%d %s", w.Code, w.Body)
 		}
 	}
+	// 门三：先写一份只复现 1 次的 PoC → 仍 blocked；改成 3 次后放行。
+	pocBody := `{"kind":"http","input":"curl -X POST https://target/api/order -d '{\"id\":1}'","expected":"返回他人订单","observed":"返回他人订单内容","reproduced":1,"evidence":"traffic: 7f3a"}`
+	if w := req("PUT", fmt.Sprintf("/api/exploration/findings/%d/gate/poc", fid), pocBody); w.Code != 200 {
+		t.Fatalf("PUT poc: %d %s", w.Code, w.Body)
+	}
 	w := req("GET", fmt.Sprintf("/api/exploration/findings/%d/gate", fid), "")
 	var g struct {
 		Gate struct {
-			State                 string `json:"state"`
-			PassedCounterexamples int    `json:"passed_counterexamples"`
-			NoveltyQueries        int    `json:"novelty_queries"`
-			SourceClasses         int    `json:"source_classes"`
+			State                 string   `json:"state"`
+			Reasons               []string `json:"reasons"`
+			PassedCounterexamples int      `json:"passed_counterexamples"`
+			NoveltyQueries        int      `json:"novelty_queries"`
+			SourceClasses         int      `json:"source_classes"`
+			PocReproductions      int      `json:"poc_reproductions"`
 		} `json:"gate"`
 	}
 	if err := json.Unmarshal(w.Body.Bytes(), &g); err != nil {
 		t.Fatal(err)
 	}
-	if g.Gate.State != "passed" || g.Gate.PassedCounterexamples != 5 || g.Gate.NoveltyQueries != 3 || g.Gate.SourceClasses != 3 {
-		t.Fatalf("两门齐应 passed：%+v", g.Gate)
+	if g.Gate.State != "blocked" || !strings.Contains(strings.Join(g.Gate.Reasons, "; "), "复现次数不足") {
+		t.Fatalf("只复现 1 次应阻断：%+v", g.Gate)
+	}
+	reproduced := `{"kind":"http","input":"curl -X POST https://target/api/order -d '{\"id\":1}'","expected":"返回他人订单","observed":"返回他人订单内容","reproduced":3,"evidence":"traffic: 7f3a"}`
+	if w := req("PUT", fmt.Sprintf("/api/exploration/findings/%d/gate/poc", fid), reproduced); w.Code != 200 {
+		t.Fatalf("PUT poc: %d %s", w.Code, w.Body)
+	}
+	w = req("GET", fmt.Sprintf("/api/exploration/findings/%d/gate", fid), "")
+	if err := json.Unmarshal(w.Body.Bytes(), &g); err != nil {
+		t.Fatal(err)
+	}
+	if g.Gate.State != "passed" || g.Gate.PassedCounterexamples != 5 || g.Gate.NoveltyQueries != 3 || g.Gate.SourceClasses != 3 || g.Gate.PocReproductions != 3 {
+		t.Fatalf("三门齐应 passed：%+v", g.Gate)
 	}
 	w = req("GET", fmt.Sprintf("/api/exploration/findings/export?format=md-single&scope=selected&ids=%d", fid), "")
 	if w.Code != 200 {

@@ -14,6 +14,9 @@
 //	  漏洞"即判定撞车，直接阻断——重复的 0day 是负资产（浪费客户时间、损害报告
 //	  可信度、还可能被当成抄袭）。
 //
+//	门三（触发验证）：**无 PoC 不算 finding**。必须有一条可复制粘贴的触发输入、
+//	  观察到的结果、以及至少 2 次连续复现（一次可能是巧合/缓存/偶发状态）。
+//
 // 本包只做纯判定（无 IO、无 DB），便于单测与复用：handler 负责落库，评估只回答
 // "这批记录够不够格"。
 package vulngate
@@ -32,6 +35,9 @@ const (
 	MinNoveltyQueries = 3
 	// MinSourceClasses 是门二要求覆盖的信息源类别下限。
 	MinSourceClasses = 2
+	// MinReproductions 是门三要求的连续复现次数下限。一次成功可能是巧合：缓存、
+	// 上游偶发、时序、上一次请求的残留状态都能伪造出"漏洞"。
+	MinReproductions = 2
 )
 
 // Counterexample 是一条反例（阴性对照）：用"不该触发漏洞"的条件去验证，确认漏洞
@@ -56,10 +62,21 @@ type NoveltyCheck struct {
 	SameVuln    bool     `json:"same_vuln"`    // 命中已被公开的同一致命漏洞 → 撞车
 }
 
+// Poc 是门三要求的触发验证记录：可复制粘贴的输入 + 观察到的结果 + 复现次数。
+type Poc struct {
+	Kind       string `json:"kind"`       // http|command|file|sample 等触发方式
+	Input      string `json:"input"`      // 复现步骤：完整请求/命令/文件路径（要能直接照做）
+	Expected   string `json:"expected"`   // 预期（漏洞存在的表现）
+	Observed   string `json:"observed"`   // 实际观察到的结果
+	Reproduced int    `json:"reproduced"` // 连续复现成功次数
+	Evidence   string `json:"evidence"`   // 流量 id / 命令输出摘要
+}
+
 // Assessment 是一条 finding 当前积累的全部门记录。
 type Assessment struct {
 	Counterexamples []Counterexample
 	Novelty         []NoveltyCheck
+	Poc             *Poc
 }
 
 // Verdict 是门的结论。State 只有两种：passed / blocked。
@@ -71,6 +88,7 @@ type Verdict struct {
 	DistinctVectors       int      `json:"distinct_vectors"`
 	NoveltyQueries        int      `json:"novelty_queries"`
 	SourceClasses         int      `json:"source_classes"`
+	PocReproductions      int      `json:"poc_reproductions"`
 }
 
 // Passed 报告是否放行。
@@ -148,6 +166,26 @@ func Assess(a Assessment) Verdict {
 	}
 	if v.SourceClasses < MinSourceClasses {
 		v.blockf("撞车比对覆盖面不足：需覆盖至少 %d 类信息源（CVE 库/厂商公告/代码托管/漏洞库检索），当前 %d 类", MinSourceClasses, v.SourceClasses)
+	}
+
+	// 门三：触发验证（无 PoC 不算 finding）。
+	if a.Poc == nil {
+		v.blockf("触发验证缺失：没有 PoC 不算 finding——需记录触发方式、可复制粘贴的输入、实际观察结果与至少 %d 次连续复现", MinReproductions)
+	} else {
+		v.PocReproductions = a.Poc.Reproduced
+		switch {
+		case strings.TrimSpace(a.Poc.Kind) == "":
+			v.blockf("触发验证缺少 kind（触发方式：http/command/file/sample）")
+		case strings.TrimSpace(a.Poc.Input) == "":
+			v.blockf("触发验证缺少 input（别人要能照着你写的步骤复现）")
+		case strings.TrimSpace(a.Poc.Observed) == "":
+			v.blockf("触发验证缺少 observed（实际观察到什么才算命中）")
+		case strings.TrimSpace(a.Poc.Evidence) == "":
+			v.blockf("触发验证缺少 evidence（流量 id / 命令输出摘要）")
+		}
+		if a.Poc.Reproduced < MinReproductions {
+			v.blockf("复现次数不足：需连续成功 %d 次，当前 %d 次（一次成功可能是缓存/偶发状态）", MinReproductions, a.Poc.Reproduced)
+		}
 	}
 
 	if len(v.Reasons) == 0 {
