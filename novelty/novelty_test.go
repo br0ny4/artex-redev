@@ -77,6 +77,47 @@ func TestKEVSearchFiltersByKeywords(t *testing.T) {
 	}
 }
 
+func TestKEVSearchMatchesVersionedQuery(t *testing.T) {
+	// 真实场景：查询带版本号与 "httpd"，目录里写的是 "Apache HTTP Server Path Traversal"，
+	// 版本号在 KEV 里不存在——不能因为词形不同就漏报。
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"vulnerabilities": []map[string]any{
+				{"cveID": "CVE-2021-42013", "vendorProject": "Apache", "product": "HTTP Server",
+					"vulnerabilityName": "Apache HTTP Server Path Traversal Vulnerability",
+					"shortDescription":  "Path traversal in mod_proxy.", "dateAdded": "2021-11-03"},
+			},
+		})
+	}))
+	t.Cleanup(srv.Close)
+	old := kevFeed
+	kevFeed = srv.URL
+	t.Cleanup(func() { kevFeed = old })
+	kevMu.Lock()
+	kevCache = nil
+	kevMu.Unlock()
+
+	hits, err := KEV{}.Search(context.Background(), "apache httpd 2.4.49 path traversal")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hits) != 1 || hits[0].ID != "CVE-2021-42013" {
+		t.Fatalf("带版本号/别名的查询应命中 KEV：%+v", hits)
+	}
+	if !strings.Contains(hits[0].Title, "匹配") {
+		t.Fatalf("命中标题应写明关键词覆盖度，便于复核：%q", hits[0].Title)
+	}
+}
+
+func TestKeywordTokensDropsVersions(t *testing.T) {
+	toks := keywordTokens("apache httpd 2.4.49 path traversal")
+	for _, tok := range toks {
+		if tok == "2.4.49" || tok == "v2.4.49" {
+			t.Fatalf("版本号不该参与关键词匹配：%v", toks)
+		}
+	}
+}
+
 func TestProbeRejectsBadQueries(t *testing.T) {
 	if _, err := Probe(context.Background(), DefaultSearchers(), nil); err == nil {
 		t.Fatal("空查询应报错")

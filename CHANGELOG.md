@@ -21,7 +21,9 @@
   - **门二机器证据：平台代执行检索**。`POST /api/exploration/findings/{id}/gate/novelty/probe` 由平台真的
     请求 NVD（CVE 库）与 CISA KEV（已知被利用目录），命中条目（编号+标题+链接）落库并标记 `origin=platform`；
     是否"同一个漏洞"仍由操作员复核后手动标记（机器猜错两个方向都危险）。某个源失败不会落"没撞车"记录，
-    全部失败返回 502；`gate.notes` 注明"平台代执行 N 次检索"或"只有人工登记"。
+    全部失败返回 502；`gate.notes` 注明"平台代执行 N 次检索"或"只有人工登记"。NVD 整词 AND 查不到时
+    自动去掉通用漏洞词用产品/版本重查（结果带 `[下发日期]` 便于分辨老条目），KEV 按关键词覆盖度计分
+    （`httpd↔HTTP Server`、`rce↔Remote Code Execution` 同义词展开）。
   - **门三机器证据：平台代执行重放**。PoC 可带 `expect_status` / `expect_body_contains`，`POST
     /api/exploration/findings/{id}/gate/poc/replay` 由平台经录制代理真实发包（仍受 L3 范围/语义/预算管控），
     自动判定是否与预期一致；一致时把 `reproduced` 抬到机器实测值并回填 `observed`/`evidence`（真实流量 id），

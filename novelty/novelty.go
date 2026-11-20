@@ -95,8 +95,36 @@ type NVD struct{}
 func (NVD) Name() string  { return "nvd" }
 func (NVD) Class() string { return "cve" }
 
+// genericVulnTerms 是漏洞描述里的通用词。NVD 的 keywordSearch 是整词 AND，
+// 带上它们会把召回打到 0（"apache httpd path traversal" → 0 条），所以全量查询
+// 无命中时退一步只用产品/版本词重查。
+var genericVulnTerms = map[string]bool{
+	"path": true, "traversal": true, "vulnerability": true, "vuln": true, "rce": true,
+	"remote": true, "code": true, "execution": true, "attack": true, "exploit": true,
+	"bypass": true, "injection": true, "overflow": true, "disclosure": true,
+	"authentication": true, "authorization": true, "deserialization": true, "xss": true,
+	"csrf": true, "ssrf": true, "dos": true, "privilege": true, "escalation": true,
+}
+
 func (NVD) Search(ctx context.Context, query string) ([]Hit, error) {
-	u := fmt.Sprintf("%s?keywordSearch=%s&resultsPerPage=5", nvdAPI, url.QueryEscape(query))
+	hits, err := nvdQuery(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	if len(hits) > 0 {
+		return hits, nil
+	}
+	// 没命中时别急着回"没有重复"：把通用漏洞词去掉，用产品/版本再查一次。
+	// NVD 无鉴权限速 5 次/30s，所以每个查询最多多打一发。
+	alt := productKeywords(query)
+	if alt == "" || alt == query {
+		return nil, nil
+	}
+	return nvdQuery(ctx, alt)
+}
+
+func nvdQuery(ctx context.Context, query string) ([]Hit, error) {
+	u := fmt.Sprintf("%s?keywordSearch=%s&resultsPerPage=5&noRejected", nvdAPI, url.QueryEscape(query))
 	body, err := getJSON(ctx, u)
 	if err != nil {
 		return nil, err
@@ -105,6 +133,7 @@ func (NVD) Search(ctx context.Context, query string) ([]Hit, error) {
 		Vulnerabilities []struct {
 			CVE struct {
 				ID           string `json:"id"`
+				Published    string `json:"published"`
 				Descriptions []struct {
 					Lang  string `json:"lang"`
 					Value string `json:"value"`
@@ -120,14 +149,38 @@ func (NVD) Search(ctx context.Context, query string) ([]Hit, error) {
 		if v.CVE.ID == "" {
 			continue
 		}
+		title := enDescription(v.CVE.Descriptions)
+		if len(v.CVE.Published) >= 10 {
+			// 带上发布日期：NVD 的 keywordSearch 结果按下发时间升序，不带日期的话
+			// 1999 年的旧条目和上个月的条目看起来一样"像撞车"。
+			title = "[" + v.CVE.Published[:10] + "] " + title
+		}
 		hits = append(hits, Hit{
 			Source: "nvd",
 			ID:     v.CVE.ID,
-			Title:  truncate(enDescription(v.CVE.Descriptions), 160),
+			Title:  truncate(title, 180),
 			URL:    "https://nvd.nist.gov/vuln/detail/" + v.CVE.ID,
 		})
 	}
 	return hits, nil
+}
+
+// productKeywords 去掉通用漏洞词，保留产品/版本等能定位到具体软件的词。
+func productKeywords(query string) string {
+	var keep []string
+	for _, f := range strings.FieldsFunc(query, func(r rune) bool {
+		return r == ' ' || r == '\t' || r == ',' || r == '，'
+	}) {
+		t := strings.ToLower(strings.TrimSpace(f))
+		if t == "" || genericVulnTerms[t] {
+			continue
+		}
+		keep = append(keep, f)
+	}
+	if len(keep) < 2 {
+		return ""
+	}
+	return strings.Join(keep, " ")
 }
 
 // ---- CISA KEV ----
@@ -187,31 +240,73 @@ func (KEV) Search(ctx context.Context, query string) ([]Hit, error) {
 	if len(tokens) == 0 {
 		return nil, nil
 	}
-	var hits []Hit
+	// KEV 目录只有 1700+ 条（"已被在野利用"的子集），用它做关键词匹配必须容忍
+	// 版本号差异与同义词：查询 "apache httpd 2.4.49 path traversal" 要能命中
+	// "Apache HTTP Server Path Traversal"（目录里不写版本号）。宁可多给几条候选
+	// 让人复核，也别因为词形不同漏报。
+	type scored struct {
+		hit   Hit
+		score int
+	}
+	need := 1
+	if len(tokens) > 1 {
+		need = 2 // 多词查询至少命中 2 个词，避免 "apache" 命中半个目录
+	}
+	var matched []scored
 	for _, e := range entries {
 		hay := strings.ToLower(e.CVEID + " " + e.Vendor + " " + e.Product + " " + e.Name + " " + e.Short)
-		ok := true
+		score := 0
 		for _, t := range tokens {
-			if !strings.Contains(hay, t) {
-				ok = false
-				break
+			if kevTokenMatch(hay, t) {
+				score++
 			}
 		}
-		if !ok {
+		if score < need {
 			continue
 		}
-		hits = append(hits, Hit{
-			Source: "cisa-kev",
-			ID:     e.CVEID,
-			Title:  truncate(e.Name+"（"+e.Vendor+" "+e.Product+"，加录于 "+e.DateAdded+"）", 160),
-			URL:    "https://www.cisa.gov/known-exploited-vulnerabilities-catalog",
+		matched = append(matched, scored{
+			hit: Hit{
+				Source: "cisa-kev",
+				ID:     e.CVEID,
+				Title:  truncate(fmt.Sprintf("%s（%s %s，加录于 %s；匹配 %d/%d 关键词）", e.Name, e.Vendor, e.Product, e.DateAdded, score, len(tokens)), 200),
+				URL:    "https://www.cisa.gov/known-exploited-vulnerabilities-catalog",
+			},
+			score: score,
 		})
-		if len(hits) >= 5 {
-			break
-		}
 	}
-	sort.SliceStable(hits, func(i, j int) bool { return hits[i].ID < hits[j].ID })
+	sort.SliceStable(matched, func(i, j int) bool {
+		if matched[i].score != matched[j].score {
+			return matched[i].score > matched[j].score
+		}
+		return matched[i].hit.ID < matched[j].hit.ID
+	})
+	if len(matched) > 5 {
+		matched = matched[:5]
+	}
+	hits := make([]Hit, 0, len(matched))
+	for _, m := range matched {
+		hits = append(hits, m.hit)
+	}
 	return hits, nil
+}
+
+// kevTokenMatch 做少量同义词展开：目录里写 "HTTP Server"/"Remote Code Execution"，
+// 查询里常写 "httpd"/"RCE"。
+func kevTokenMatch(hay, token string) bool {
+	if strings.Contains(hay, token) {
+		return true
+	}
+	switch token {
+	case "httpd":
+		return strings.Contains(hay, "http server") || strings.Contains(hay, "httpd")
+	case "rce":
+		return strings.Contains(hay, "remote code execution") || strings.Contains(hay, "code execution")
+	case "xss":
+		return strings.Contains(hay, "cross-site scripting")
+	case "sqli":
+		return strings.Contains(hay, "sql injection")
+	}
+	return false
 }
 
 // ---- helpers ----
@@ -260,7 +355,7 @@ func truncate(s string, n int) string {
 	return string(r[:n]) + "…"
 }
 
-// keywordTokens 把查询切成小写关键词（去掉常见虚词），KEV 用 AND 过滤。
+// keywordTokens 把查询切成小写关键词（去掉常见虚词与版本号），KEV 用覆盖度计分。
 func keywordTokens(q string) []string {
 	stop := map[string]bool{"the": true, "and": true, "for": true, "with": true, "that": true, "this": true,
 		"vulnerability": true, "vuln": true, "cve": true}
@@ -272,6 +367,10 @@ func keywordTokens(q string) []string {
 		if len(f) < 3 || stop[f] {
 			continue
 		}
+		// 纯版本号（2.4.49 / v2.4.49）与纯数字不进关键词：漏洞库目录不写版本。
+		if isVersionToken(f) {
+			continue
+		}
 		out = append(out, f)
 	}
 	sort.Strings(out)
@@ -279,4 +378,23 @@ func keywordTokens(q string) []string {
 		out = out[:6]
 	}
 	return out
+}
+
+// isVersionToken 判断 token 是否只是版本号（2.4.49、v2、1.0.2），这类词不适合当关键词。
+func isVersionToken(t string) bool {
+	t = strings.TrimPrefix(t, "v")
+	if t == "" {
+		return false
+	}
+	hasDigit := false
+	for _, r := range t {
+		if r >= '0' && r <= '9' {
+			hasDigit = true
+			continue
+		}
+		if r != '.' {
+			return false
+		}
+	}
+	return hasDigit
 }

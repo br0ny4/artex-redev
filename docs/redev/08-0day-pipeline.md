@@ -106,8 +106,14 @@
 人工登记的 query/hits 只能证明"agent 说它查过"。平台代检把这一步也变成机器事实：
 
 - 内置两个免鉴权源：**NVD**（`source_class=cve`，`keywordSearch` 全文检索）与
-  **CISA KEV**（`source_class=advisory`，已知被利用漏洞目录，进程内缓存 6 小时，
-  关键词 AND 过滤）。两者恰好覆盖门二要求的"≥2 类信息源"。
+  **CISA KEV**（`source_class=advisory`，已知被利用漏洞目录，进程内缓存 6 小时）。
+  两者恰好覆盖门二要求的"≥2 类信息源"。
+- 词形差异要兜住：NVD 的 `keywordSearch` 是整词 AND，直接查 "apache httpd path
+  traversal" 会得到 0 条；所以无命中时**自动退一步**只用产品/版本词重查（去掉
+  path/traversal/rce 等通用词），命中的标题带 `[下发日期]` 前缀——NVD 结果按时间升序，
+  不标日期的话 1999 年的条目和上个月的看起来一样像撞车。KEV 目录不写版本号，所以按
+  关键词覆盖度计分（多词查询至少命中 2 个词，`httpd↔HTTP Server`、`rce↔Remote Code
+  Execution` 做同义词展开），命中标题写明"匹配 N/M 关键词"，阈值内取覆盖度最高的 5 条。
 - 平台**只负责查与记**：命中条目（编号 + 标题 + 可核对链接）原样落库，标记
   `origin=platform`；"是不是同一个漏洞"**故意不自动判定**——机器猜错会放过重复项，
   也可能把真 0day 判成重复。操作员复核后手动标记 `same_vuln`。
