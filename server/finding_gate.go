@@ -47,12 +47,18 @@ func (s *Server) getFindingGate(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 500, err.Error())
 		return
 	}
+	replays, err := s.m.pg.ListFindingPocReplays(r.Context(), id)
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
 	writeJSON(w, 200, map[string]any{
 		"finding_id":      id,
 		"gate":            vulngate.Assess(a),
 		"counterexamples": a.Counterexamples,
 		"novelty_checks":  a.Novelty,
 		"poc":             a.Poc,
+		"poc_replays":     replays,
 		"requirements":    gateRequirements(),
 	})
 }
@@ -285,6 +291,10 @@ func (s *Server) setFindingPoc(w http.ResponseWriter, r *http.Request) {
 		Observed   string `json:"observed"`
 		Reproduced int    `json:"reproduced"`
 		Evidence   string `json:"evidence"`
+		// ExpectStatus / ExpectBodyContains 是机器可判预期：只有填了它们平台才能
+		// 代执行重放并自动判定"这次到底复现没有"。
+		ExpectStatus       int      `json:"expect_status"`
+		ExpectBodyContains []string `json:"expect_body_contains"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&p); err != nil {
 		writeErr(w, 400, "解析请求失败: "+err.Error())
@@ -303,9 +313,21 @@ func (s *Server) setFindingPoc(w http.ResponseWriter, r *http.Request) {
 			"（kind=触发方式, input=可复制粘贴的复现步骤, observed=实际观察结果, evidence=流量 id/命令输出）")
 		return
 	}
+	// 机器可判预期做最基本的清洗：空片段丢掉，状态码只接受 100..599。
+	expectContains := make([]string, 0, len(p.ExpectBodyContains))
+	for _, frag := range p.ExpectBodyContains {
+		if frag = strings.TrimSpace(frag); frag != "" {
+			expectContains = append(expectContains, frag)
+		}
+	}
+	if p.ExpectStatus < 0 || p.ExpectStatus > 599 {
+		writeErr(w, 400, "expect_status 必须是 100..599 之间的状态码（或 0 表示不判定）")
+		return
+	}
 	poc, err := s.m.pg.UpsertFindingPoc(r.Context(), id, vulngate.Poc{
 		Kind: strings.ToLower(strings.TrimSpace(p.Kind)), Input: p.Input, Expected: p.Expected,
 		Observed: p.Observed, Reproduced: p.Reproduced, Evidence: p.Evidence,
+		ExpectStatus: p.ExpectStatus, ExpectBodyContains: expectContains,
 	})
 	if err != nil {
 		if err == db.ErrFindingNotFound {

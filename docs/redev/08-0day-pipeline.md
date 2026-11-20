@@ -1,7 +1,7 @@
 # 0day 流水线与三道准入门的工程设计
 
 > 状态：门一（反例验证）、门二（撞车比对）、门三（触发验证/PoC）已实现并强制在导出
-> 出口；流水线其余环节逐步接入。代码：`vulngate/`（判定）、`db/finding_gate.go`（存取）、
+> 出口；门三支持由平台代执行重放（`kind=http`），复现次数由机器累加；流水线其余环节逐步接入。代码：`vulngate/`（判定）、`db/finding_gate.go`（存取）、
 > `server/finding_gate.go`（接口与导出拦截）。
 
 ## 1. 目标
@@ -25,10 +25,10 @@
 | 4. 触发验证 | 可复现的 PoC（请求/命令/样本），无 PoC 不算 finding | guard 放行条件下的真实执行 + `PUT …/gate/poc` 落库 | ✅ 强制 |
 | **5. 门一：反例验证** | ≥5 条反例记录 | `POST /api/exploration/findings/{id}/gate/counterexamples` | ✅ 强制 |
 | **6. 门二：撞车比对** | ≥3 次跨源检索记录 | `POST /api/exploration/findings/{id}/gate/novelty` | ✅ 强制 |
-| **5b. 门三：触发验证** | 1 份 PoC（kind/input/observed/evidence + ≥2 次复现） | `PUT /api/exploration/findings/{id}/gate/poc` | ✅ 强制 |
+| **5b. 门三：触发验证** | 1 份 PoC（kind/input/observed/evidence + ≥2 次复现） | `PUT /api/exploration/findings/{id}/gate/poc`、`POST …/gate/poc/replay` | ✅ 强制 |
 | 7. 报告与提交 | 交付物 | 导出接口（门未过则 409） | ✅ 强制 |
 
-## 3. 为什么两门必须在工程层
+## 3. 为什么三道门必须在工程层
 
 提示词是软约束。模型完全可以没做任何验证，就在报告里写"已用 5 个反例验证，未发现
 重复"。所以门**只认结构化记录**，且判定逻辑不接受"我验证过了"这种自由文本：
@@ -66,6 +66,28 @@
 | `observed` | 实际观察到的结果 |
 | `reproduced` | 连续复现成功次数，**至少 2**：一次成功可能是缓存、上游偶发、时序或上一次请求的残留状态 |
 | `evidence` | 流量 id / 命令输出摘要 |
+| `expect_status`（可选） | 机器可判的预期状态码；给了它平台才能代跑重放并自动判定是否复现 |
+| `expect_body_contains`（可选） | 机器可判的响应体片段（大小写不敏感包含；只写能证明漏洞存在的最短片段） |
+
+#### 平台代执行重放（`POST /api/exploration/findings/{id}/gate/poc/replay`）
+
+`reproduced` 由人/agent 填写，本身可以造假。重放把"真的跑过"从声明变成机器事实：
+
+- 只支持 `kind=http`：命令/文件/样本涉及在宿主机执行目标代码，平台不代跑（要动态
+  行为请换沙箱 + `binary-re` 域包）。
+- 必须经过录制代理：录制关闭时直接 409。这样重放也会落进流量索引，形成证据链，
+  而且范围/语义/预算仍由 L3 判定（判不过的请求不会到达目标，`X-ArtEx-Policy` 会被
+  记录为"被规范执行层拦下"，不算复现）。
+- 判定用 `expect_status` + `expect_body_contains`；没填 `expect_status` 直接 400
+  （无法机器判定），不给"看起来像复现"的模糊空间。
+- 一致的重放：`reproduced` 抬到"机器实测一致次数"（只增不减），`observed` 回填
+  `平台重放 METHOD URL -> HTTP n`，`evidence` 回填真实流量 id；每次重放都落
+  `finding_poc_replays` 历史（客户端可用 `poc_replays` 查看到底跑过几次、结果如何）。
+- 不一致的重放只进历史，**不覆盖**人写的 `observed`：失败结果盖掉人的判断，
+  等于把"这次没复现"洗成"复现了"。
+- 门本身仍只看 `reproduced >= 2`；重放情况通过 `gate.notes` 提示（"平台重放已验证 N 次"
+  /"目前只有人工录入证据"），不额外阻断——离线域无法重放，改成阻断要按域包配置，
+  留给后续。
 
 ### 门二：撞车比对（`MinNoveltyQueries = 3`、`MinSourceClasses = 2`）
 
@@ -95,10 +117,14 @@ curl -X POST -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/jso
   -d '{"query":"ACME Gateway 4.2 RCE","source_class":"cve","hits":[],"same_vuln":false}' \
   http://127.0.0.1:8787/api/exploration/findings/12/gate/novelty
 
-# 写触发验证（PoC），reproduced 至少 2
+# 写触发验证（PoC），reproduced 至少 2；带 expect_status 的 http PoC 可让平台代跑重放
 curl -X PUT -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
-  -d '{"kind":"http","input":"curl -X POST https://target/api/order -d '{"id":1}'","expected":"返回他人订单","observed":"返回他人订单内容","reproduced":3,"evidence":"traffic: a1b2c3"}' \
+  -d '{"kind":"http","input":"GET /api/order?id=2 HTTP/1.1\nHost: target.example.com\nCookie: sid=...\n","expected":"返回他人订单","observed":"返回了他人的订单内容","reproduced":2,"evidence":"traffic: a1b2c3","expect_status":200,"expect_body_contains":["user_id"]}' \
   http://127.0.0.1:8787/api/exploration/findings/12/gate/poc
+
+# 平台代跑重放：经录制代理真实发包，一致则复现次数按机器实测抬高
+curl -X POST -H "Authorization: Bearer $TOKEN" \
+  http://127.0.0.1:8787/api/exploration/findings/12/gate/poc/replay
 ```
 
 写错可撤回：`DELETE .../gate/counterexamples/{ceid}`、`DELETE .../gate/novelty/{nid}`、
@@ -130,6 +156,7 @@ HTTP 409
    且尚未**强制**在线域必须引用真实流量。
 2. **撞车检索未由平台代为执行**：目前是记录 agent/操作员实际做过的检索。若接入可用的
    检索 MCP，可改为平台侧执行并自动落 `hits`，进一步压缩"假装查过"的空间。
-3. **触发验证的记录仍是人工/agent 录入**：门三要求结构化 PoC 与复现次数，但"这个 PoC
-   是否真的跑过"平台还没有代执行核对（阶段 2–3 的候选生成、可达性同样靠 agent 自主发挥）。
-   下一步是把 PoC 的 `input` 在 L3/guard 管控下实际重放一次，用真实流量回填 `observed`。
+3. **重放只覆盖 `kind=http`**：平台已能代跑 HTTP PoC 并逐次判定、回填真实流量，但
+   `command`/`file`/`sample` 类 PoC 仍在宿主机由人/agent 执行（平台刻意不代跑）。
+   代价是这几类"真的跑过吗"仍靠自觉；下一步是把沙箱执行结果也纳入机器证据
+   （沙箱回执 + 样本哈希），或按域包声明哪些 kind 可以阻断。

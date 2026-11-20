@@ -38,18 +38,21 @@ import type {
   Finding,
   FindingAssetTree,
   FindingDeepenResponse,
+  FindingGate,
+  FindingGateRequirements,
   FindingGroupsPage,
   FindingQuery,
-  FindingGate,
   FindingRetest,
-  GateCounterexample,
-  GateNoveltyCheck,
-  GatePoc,
   FindingStats,
   FindingStatus,
   FindingsPage,
   FindingTraffic,
   FindingTrafficDetail,
+  GateCounterexample,
+  GateNoveltyCheck,
+  GatePoc,
+  GatePocReplay,
+  GateVerdict,
   IntentAsset,
   InterceptApprovalFilter,
   InterceptApprovalRow,
@@ -683,14 +686,10 @@ export const api = {
   deleteFinding: (id: string) => del<{ deleted: boolean; id: number }>(`/exploration/findings/${id}`),
   // 0day 准入（三道门）：查询/录入/撤回。未过门导出会在服务端被 409 拦下。
   findingGate: (id: string) => get<FindingGate>(`/exploration/findings/${encodeURIComponent(id)}/gate`),
-  addFindingCounterexample: (
-    id: string,
-    body: Omit<GateCounterexample, "id" | "ordinal">,
-  ) => post<FindingGate>(`/exploration/findings/${encodeURIComponent(id)}/gate/counterexamples`, body),
+  addFindingCounterexample: (id: string, body: Omit<GateCounterexample, "id" | "ordinal">) =>
+    post<FindingGate>(`/exploration/findings/${encodeURIComponent(id)}/gate/counterexamples`, body),
   deleteFindingCounterexample: (id: string, ceid: number) =>
-    del<{ deleted: boolean }>(
-      `/exploration/findings/${encodeURIComponent(id)}/gate/counterexamples/${ceid}`,
-    ),
+    del<{ deleted: boolean }>(`/exploration/findings/${encodeURIComponent(id)}/gate/counterexamples/${ceid}`),
   addFindingNoveltyCheck: (id: string, body: Omit<GateNoveltyCheck, "id">) =>
     post<FindingGate>(`/exploration/findings/${encodeURIComponent(id)}/gate/novelty`, body),
   deleteFindingNoveltyCheck: (id: string, nid: number) =>
@@ -699,6 +698,17 @@ export const api = {
     put<FindingGate>(`/exploration/findings/${encodeURIComponent(id)}/gate/poc`, body),
   deleteFindingPoc: (id: string) =>
     del<{ deleted: boolean }>(`/exploration/findings/${encodeURIComponent(id)}/gate/poc`),
+  // 平台代跑 PoC：经录制代理真实发包（受 L3 范围/语义/预算管控），
+  // 一致时把复现次数抬到机器实测值并回填 observed/evidence。
+  replayFindingPoc: (id: string) =>
+    post<{
+      replay: GatePocReplay;
+      replays: GatePocReplay[];
+      matched: boolean;
+      mismatches: string[];
+      gate: GateVerdict;
+      requirements: FindingGateRequirements;
+    }>(`/exploration/findings/${encodeURIComponent(id)}/gate/poc/replay`, {}),
   findingRetests: (id: string) =>
     get<{ retests: FindingRetest[] }>(`/exploration/findings/${encodeURIComponent(id)}/retests`).then((r) =>
       arr(r.retests),

@@ -66,13 +66,19 @@ type NoveltyCheck struct {
 }
 
 // Poc 是门三要求的触发验证记录：可复制粘贴的输入 + 观察到的结果 + 复现次数。
+//
+// ExpectStatus / ExpectBodyContains 是**机器可判的预期**：只有填了它们，平台才能
+// 代执行重放并自动判定"这次到底复现没有"。手写的 Expected 是给人看的，不能拿来自
+// 动判定——那是又一次"模型自己说通过"。
 type Poc struct {
-	Kind       string `json:"kind"`       // http|command|file|sample 等触发方式
-	Input      string `json:"input"`      // 复现步骤：完整请求/命令/文件路径（要能直接照做）
-	Expected   string `json:"expected"`   // 预期（漏洞存在的表现）
-	Observed   string `json:"observed"`   // 实际观察到的结果
-	Reproduced int    `json:"reproduced"` // 连续复现成功次数
-	Evidence   string `json:"evidence"`   // 流量 id / 命令输出摘要
+	Kind               string   `json:"kind"`                           // http|command|file|sample 等触发方式
+	Input              string   `json:"input"`                          // 复现步骤：完整请求/命令/文件路径（要能直接照做）
+	Expected           string   `json:"expected"`                       // 预期（漏洞存在的表现，给人看）
+	Observed           string   `json:"observed"`                       // 实际观察到的结果
+	Reproduced         int      `json:"reproduced"`                     // 连续复现成功次数
+	Evidence           string   `json:"evidence"`                       // 流量 id / 命令输出摘要
+	ExpectStatus       int      `json:"expect_status,omitempty"`        // 重放判定用：期望的响应状态码
+	ExpectBodyContains []string `json:"expect_body_contains,omitempty"` // 重放判定用：响应体必须包含的片段
 }
 
 // Assessment 是一条 finding 当前积累的全部门记录。
@@ -80,6 +86,11 @@ type Assessment struct {
 	Counterexamples []Counterexample
 	Novelty         []NoveltyCheck
 	Poc             *Poc
+	// PocReplays / PocReplayMatched 是平台代执行重放的次数（总次数 / 与预期一致的次数）。
+	// 它们不参与"挡不挡"的判定，但决定 Verdict 里那条 note：结论到底是机器跑出来的，
+	// 还是人写上去的。
+	PocReplays       int
+	PocReplayMatched int
 }
 
 // Verdict 是门的结论。State 只有两种：passed / blocked。
@@ -92,6 +103,10 @@ type Verdict struct {
 	NoveltyQueries        int      `json:"novelty_queries"`
 	SourceClasses         int      `json:"source_classes"`
 	PocReproductions      int      `json:"poc_reproductions"`
+	PocReplays            int      `json:"poc_replays"`
+	PocReplayMatched      int      `json:"poc_replay_matched"`
+	// Notes 是不阻断放行、但操作员必须看到的提示（例如"触发验证未经平台重放"）。
+	Notes []string `json:"notes,omitempty"`
 }
 
 // Passed 报告是否放行。
@@ -189,6 +204,21 @@ func Assess(a Assessment) Verdict {
 		if a.Poc.Reproduced < MinReproductions {
 			v.blockf("复现次数不足：需连续成功 %d 次，当前 %d 次（一次成功可能是缓存/偶发状态）", MinReproductions, a.Poc.Reproduced)
 		}
+		v.PocReplays = a.PocReplays
+		v.PocReplayMatched = a.PocReplayMatched
+		if a.Poc.Reproduced >= MinReproductions {
+			// 复现次数够了，但"谁跑出来的"决定这条证据的可信度：平台代执行重放会
+			// 经过 L3 判定并落真实流量，人工录入则只是一个数字。不阻断，但必须让
+			// 操作员看到区别——报告里"已复现"三个字的含金量不该靠猜。
+			if a.PocReplayMatched > 0 {
+				v.note("平台重放已验证：%d 次重放与预期一致（共 %d 次尝试）", a.PocReplayMatched, a.PocReplays)
+			} else {
+				v.note("触发验证目前只有人工/agent 录入的证据，未经平台重放；建议在「准入」页点一次「重放」，由平台真实发包并回填流量证据")
+			}
+			if a.PocReplays > a.PocReplayMatched {
+				v.note("有 %d 次平台重放与预期不符，请确认是环境波动还是 PoC 本身不稳定", a.PocReplays-a.PocReplayMatched)
+			}
+		}
 	}
 
 	if len(v.Reasons) == 0 {
@@ -202,6 +232,11 @@ func Assess(a Assessment) Verdict {
 
 func (v *Verdict) blockf(format string, args ...any) {
 	v.Reasons = append(v.Reasons, fmt.Sprintf(format, args...))
+}
+
+// note 记录一条不阻断的提示（操作员需要知道、但不该因此挡住导出）。
+func (v *Verdict) note(format string, args ...any) {
+	v.Notes = append(v.Notes, fmt.Sprintf(format, args...))
 }
 
 // vectorKey 归一化一条反例的"手法 + 误报路径"，用来识别 5 个副本伪装成 5 条反例。

@@ -104,11 +104,11 @@
 24 commits / 92 files changed / +5,977 −191
 新增文件 29（其中 Go 15、域包 YAML 9、文档 3、工作流 1、前端页 1）
 Go 文件 354 → 369
-新增代码：policy/ 3,944 行（含测试）、vulngate/ 340、server 层 1,002、db 599、traffic 382
-新增 HTTP 端点 10 个：policy holds ×2（列表/答复）、mcp presets、finding gate ×7
-（门状态查询、反例增删、撞车记录增删、PoC 写入/删除）
+新增代码：policy/ 3,944 行（含测试）、vulngate/ 739、server 策略与门相关 1,837、db 599、traffic 382
+新增 HTTP 端点 11 个：policy holds ×2（列表/答复）、mcp presets、finding gate ×8
+（门状态查询、反例增删、撞车记录增删、PoC 写入/删除、PoC 平台重放）
 （status/decisions/chain 三个端点发布快照时已有）
-新增测试函数 34 个（policy 包 51 个测试函数；vulngate 10 个）
+新增测试函数 46 个（policy 包 51 个测试函数；vulngate 17 个）
 ```
 
 ## 8. 没有改的部分（避免误读为"全重写"）

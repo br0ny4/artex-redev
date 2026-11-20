@@ -197,6 +197,9 @@ export ARTEX_ENGAGEMENT_FILE=./policy/source-audit/deployment-context.yaml
 - **提交 0day 前必须过三道门**（漏洞详情 → 「准入」页录入，或直接调接口）：一份可复现的 PoC
   （≥2 次连续复现）、≥5 条反例、≥3 次跨 ≥2 类信息源的撞车比对；未过门的 finding 导出报告
   会被 409 拦下。规则见 [08](docs/redev/08-0day-pipeline.md)。
+- **PoC 可以让平台代跑**：「准入」页填入 `expect_status`（可选 `expect_body_contains`）后点「平台重放」，
+  平台会经录制代理真实发包——仍受范围/语义/预算判定，判不过的请求不会到达目标——并把复现次数按
+  机器实测抬高、用真实流量 id 回填证据。`command`/`file`/`sample` 涉及在宿主机执行代码，平台不代跑。
 
 ### 3.8 样本分诊（malware-triage 域包）
 

@@ -18,6 +18,12 @@
   - 强制点在导出出口：未过门的 finding 导出返回 409 并逐条给出原因；`force=1&reason=…` 可逐次放行并记日志，
     `ARTEX_FINDING_GATE=off` 是迁移旧数据的逃生口。
   - 反例凭据可引用 `traffic_ids`：录入时服务端核对流量索引，编造的 id 直接 400。
+  - **门三机器证据：平台代执行重放**。PoC 可带 `expect_status` / `expect_body_contains`，`POST
+    /api/exploration/findings/{id}/gate/poc/replay` 由平台经录制代理真实发包（仍受 L3 范围/语义/预算管控），
+    自动判定是否与预期一致；一致时把 `reproduced` 抬到机器实测值并回填 `observed`/`evidence`（真实流量 id），
+    不一致只进重放历史、不覆盖人写的观察。只代跑 `kind=http`；`command`/`file`/`sample` 涉及在宿主机执行代码，
+    平台刻意不代跑。重放记录在 `poc_replays`（`finding_poc_replays` 表），`gate.notes` 会注明"平台重放已验证"或
+    "目前只有人工录入证据"。
   - 接口：`GET /api/exploration/findings/{id}/gate`、`POST …/gate/counterexamples`、
     `POST …/gate/novelty`、`PUT …/gate/poc`（均支持撤回删除）；判定逻辑在纯 Go 包 `vulngate/`，可单测。设计见
     [`docs/redev/08-0day-pipeline.md`](docs/redev/08-0day-pipeline.md)。
@@ -28,6 +34,9 @@
 
 - **0day 准入端到端**：反例不足挡、5 条副本挡、撞车挡（带编号）、缺 PoC 挡、只复现 1 次挡、
   三门齐才放行、导出 409 与 force 行为（`vulngate` 10 个单测 + `server/finding_gate_test.go`）。
+- **PoC 平台重放**：带机器可判预期的 PoC 两次重放后复现次数由机器抬到 2、证据换成真实流量 id；
+  重放结果不一致时不计数、不覆盖人工 `observed`；`kind=command` / 缺 `expect_status` / 坏请求行分别 400
+  （`vulngate/replay_test.go` + `server/finding_poc_replay_test.go`）。
 - **L3 出口端到端验收**（`traffic/policy_e2e_test.go`）：起真实录制代理，把请求交给代理，
   断言范围外目标返回 403 + `X-ArtEx-Policy`、阻断说明含"平台管控"、尝试进了流量索引。
   用不存在的 `.invalid` 域名做目标：若代理把请求转发出去过，会得到 502 而不是 403——

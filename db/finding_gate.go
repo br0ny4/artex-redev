@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/br0ny4/artex-redev/vulngate"
 )
@@ -146,6 +147,9 @@ func (d *DB) FindingGateAssessment(ctx context.Context, findingID int64) (vulnga
 	if a.Poc, err = d.GetFindingPoc(ctx, findingID); err != nil {
 		return a, err
 	}
+	if a.PocReplays, a.PocReplayMatched, err = d.CountFindingPocReplays(ctx, findingID); err != nil {
+		return a, err
+	}
 	return a, nil
 }
 
@@ -213,10 +217,39 @@ func (d *DB) FindingGateVerdicts(ctx context.Context, ids []int64) (map[int64]vu
 	if err != nil {
 		return nil, err
 	}
+	replays, err := d.loadPocReplayCounts(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
 	for _, id := range ids {
-		out[id] = vulngate.Assess(vulngate.Assessment{Counterexamples: ces[id], Novelty: nov[id], Poc: pocs[id]})
+		rc := replays[id]
+		out[id] = vulngate.Assess(vulngate.Assessment{
+			Counterexamples: ces[id], Novelty: nov[id], Poc: pocs[id],
+			PocReplays: rc[0], PocReplayMatched: rc[1],
+		})
 	}
 	return out, nil
+}
+
+// loadPocReplayCounts 批量取重放统计（总次数 / 一致次数），供导出时一次评估。
+func (d *DB) loadPocReplayCounts(ctx context.Context, ids []int64) (map[int64][2]int, error) {
+	out := map[int64][2]int{}
+	rows, err := d.QueryContext(ctx, `
+		SELECT finding_id, COUNT(*), COUNT(*) FILTER (WHERE matched)
+		FROM finding_poc_replays WHERE finding_id = ANY($1) GROUP BY finding_id`, ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var fid int64
+		var total, matched int
+		if err := rows.Scan(&fid, &total, &matched); err != nil {
+			return nil, err
+		}
+		out[fid] = [2]int{total, matched}
+	}
+	return out, rows.Err()
 }
 
 // FindingGateSummary 是阻塞项的展示用摘要（导出被挡时返回给调用方）。
@@ -274,30 +307,38 @@ func (d *DB) UpsertFindingPoc(ctx context.Context, findingID int64, p vulngate.P
 	if !exists {
 		return p, sql.ErrNoRows
 	}
-	_, err := d.ExecContext(ctx, `
-		INSERT INTO finding_pocs (finding_id, kind, input, expected, observed, reproduced, evidence)
-		VALUES ($1,$2,$3,$4,$5,$6,$7)
+	expectContains, err := json.Marshal(p.ExpectBodyContains)
+	if err != nil {
+		return p, err
+	}
+	_, err = d.ExecContext(ctx, `
+		INSERT INTO finding_pocs (finding_id, kind, input, expected, observed, reproduced, evidence, expect_status, expect_body_contains)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
 		ON CONFLICT (finding_id) DO UPDATE SET
 			kind=EXCLUDED.kind, input=EXCLUDED.input, expected=EXCLUDED.expected,
 			observed=EXCLUDED.observed, reproduced=EXCLUDED.reproduced,
-			evidence=EXCLUDED.evidence, updated_at=now()`,
-		findingID, p.Kind, p.Input, p.Expected, p.Observed, p.Reproduced, p.Evidence)
+			evidence=EXCLUDED.evidence, expect_status=EXCLUDED.expect_status,
+			expect_body_contains=EXCLUDED.expect_body_contains, updated_at=now()`,
+		findingID, p.Kind, p.Input, p.Expected, p.Observed, p.Reproduced, p.Evidence,
+		p.ExpectStatus, string(expectContains))
 	return p, err
 }
 
 // GetFindingPoc 返回一条 finding 的触发验证记录；没有时返回 (nil, nil)。
 func (d *DB) GetFindingPoc(ctx context.Context, findingID int64) (*vulngate.Poc, error) {
 	var p vulngate.Poc
+	var expectContains string
 	err := d.QueryRowContext(ctx, `
-		SELECT kind, input, expected, observed, reproduced, evidence
+		SELECT kind, input, expected, observed, reproduced, evidence, expect_status, expect_body_contains
 		FROM finding_pocs WHERE finding_id=$1`, findingID).
-		Scan(&p.Kind, &p.Input, &p.Expected, &p.Observed, &p.Reproduced, &p.Evidence)
+		Scan(&p.Kind, &p.Input, &p.Expected, &p.Observed, &p.Reproduced, &p.Evidence, &p.ExpectStatus, &expectContains)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
 	}
+	_ = json.Unmarshal([]byte(expectContains), &p.ExpectBodyContains)
 	return &p, nil
 }
 
@@ -317,7 +358,7 @@ func (d *DB) DeleteFindingPoc(ctx context.Context, findingID int64) error {
 func (d *DB) loadPocs(ctx context.Context, ids []int64) (map[int64]*vulngate.Poc, error) {
 	out := map[int64]*vulngate.Poc{}
 	rows, err := d.QueryContext(ctx, `
-		SELECT finding_id, kind, input, expected, observed, reproduced, evidence
+		SELECT finding_id, kind, input, expected, observed, reproduced, evidence, expect_status, expect_body_contains
 		FROM finding_pocs WHERE finding_id = ANY($1)`, ids)
 	if err != nil {
 		return nil, err
@@ -326,11 +367,85 @@ func (d *DB) loadPocs(ctx context.Context, ids []int64) (map[int64]*vulngate.Poc
 	for rows.Next() {
 		var fid int64
 		var p vulngate.Poc
-		if err := rows.Scan(&fid, &p.Kind, &p.Input, &p.Expected, &p.Observed, &p.Reproduced, &p.Evidence); err != nil {
+		var expectContains string
+		if err := rows.Scan(&fid, &p.Kind, &p.Input, &p.Expected, &p.Observed, &p.Reproduced, &p.Evidence, &p.ExpectStatus, &expectContains); err != nil {
 			return nil, err
 		}
+		_ = json.Unmarshal([]byte(expectContains), &p.ExpectBodyContains)
 		pp := p
 		out[fid] = &pp
 	}
 	return out, rows.Err()
+}
+
+// FindingPocReplay 是一次平台代执行的 PoC 重放记录（机器证据，保留每一次尝试）。
+type FindingPocReplay struct {
+	ID         int64     `json:"id,omitempty"`
+	TrafficID  string    `json:"traffic_id"`
+	StatusCode int       `json:"status_code"`
+	Matched    bool      `json:"matched"`
+	Detail     string    `json:"detail"`
+	CreatedAt  time.Time `json:"created_at"`
+}
+
+// AddFindingPocReplay 落一条重放记录。
+func (d *DB) AddFindingPocReplay(ctx context.Context, findingID int64, r FindingPocReplay) (FindingPocReplay, error) {
+	if findingID <= 0 {
+		return r, errors.New("finding_id 必须为正")
+	}
+	var exists bool
+	if err := d.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM findings WHERE id=$1)`, findingID).Scan(&exists); err != nil {
+		return r, err
+	}
+	if !exists {
+		return r, sql.ErrNoRows
+	}
+	err := d.QueryRowContext(ctx, `
+		INSERT INTO finding_poc_replays (finding_id, traffic_id, status_code, matched, detail)
+		VALUES ($1,$2,$3,$4,$5) RETURNING id, created_at`,
+		findingID, r.TrafficID, r.StatusCode, r.Matched, r.Detail).Scan(&r.ID, &r.CreatedAt)
+	return r, err
+}
+
+// ListFindingPocReplays 按写入倒序返回重放记录（最新的在前）。
+func (d *DB) ListFindingPocReplays(ctx context.Context, findingID int64) ([]FindingPocReplay, error) {
+	rows, err := d.QueryContext(ctx, `
+		SELECT id, traffic_id, status_code, matched, detail, created_at
+		FROM finding_poc_replays WHERE finding_id=$1 ORDER BY id DESC`, findingID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []FindingPocReplay
+	for rows.Next() {
+		var r FindingPocReplay
+		if err := rows.Scan(&r.ID, &r.TrafficID, &r.StatusCode, &r.Matched, &r.Detail, &r.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// CountFindingPocReplays 返回该 finding 的重放总次数与一致次数。
+func (d *DB) CountFindingPocReplays(ctx context.Context, findingID int64) (total, matched int, err error) {
+	err = d.QueryRowContext(ctx, `
+		SELECT COUNT(*), COUNT(*) FILTER (WHERE matched)
+		FROM finding_poc_replays WHERE finding_id=$1`, findingID).Scan(&total, &matched)
+	return total, matched, err
+}
+
+// UpdateFindingPocVerification 用机器重放结果回填 observed / evidence 与复现次数。
+// 只写这几列：kind/input/expected 是人的判断，不能被重放覆盖。
+func (d *DB) UpdateFindingPocVerification(ctx context.Context, findingID int64, reproduced int, observed, evidence string) error {
+	res, err := d.ExecContext(ctx, `
+		UPDATE finding_pocs SET reproduced=$2, observed=$3, evidence=$4, updated_at=now()
+		WHERE finding_id=$1`, findingID, reproduced, observed, evidence)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
 }

@@ -7,7 +7,7 @@
 
 import * as React from "react";
 
-import { ShieldCheckIcon, Trash2Icon } from "lucide-react";
+import { PlayIcon, ShieldCheckIcon, Trash2Icon } from "lucide-react";
 import { toast } from "sonner";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -20,7 +20,7 @@ import { Label } from "@/components/ui/label";
 import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
 import { api } from "@/lib/api";
-import type { FindingGate, GateCounterexample, GateNoveltyCheck, GatePoc } from "@/lib/types";
+import type { FindingGate, GateCounterexample, GateNoveltyCheck, GatePoc, GatePocReplay } from "@/lib/types";
 
 const SOURCE_CLASSES = [
   { value: "cve", label: "CVE 库" },
@@ -127,6 +127,17 @@ export function FindingGatePanel({ findingId, readOnly = false }: { findingId: s
             <ProgressRow label="撞车比对 · 检索次数" current={v.novelty_queries} min={req.min_novelty_queries} />
             <ProgressRow label="撞车比对 · 信息源类别" current={v.source_classes} min={req.min_source_classes} />
           </div>
+          {v.notes?.length ? (
+            <Alert>
+              <AlertDescription>
+                <ul className="list-disc pl-4 text-xs">
+                  {v.notes.map((n) => (
+                    <li key={n}>{n}</li>
+                  ))}
+                </ul>
+              </AlertDescription>
+            </Alert>
+          ) : null}
           {v.reasons?.length ? (
             <Alert variant="destructive">
               <AlertDescription>
@@ -143,10 +154,22 @@ export function FindingGatePanel({ findingId, readOnly = false }: { findingId: s
 
       <PocSection
         poc={gate.poc}
+        replays={gate.poc_replays ?? []}
         readOnly={readOnly}
         busy={busy === "poc"}
+        replayBusy={busy === "replay"}
         onSave={(p) => run("poc", () => api.setFindingPoc(findingId, p))}
         onDelete={() => run("poc", () => api.deleteFindingPoc(findingId))}
+        onReplay={() =>
+          run("replay", async () => {
+            const r = await api.replayFindingPoc(findingId);
+            if (r.matched) {
+              toast.success(`重放与预期一致：HTTP ${r.replay.status_code}`);
+            } else {
+              toast.error(`重放与预期不一致：${(r.mismatches ?? []).join("；") || "未取到判定原因"}`);
+            }
+          })
+        }
       />
 
       <CounterexampleSection
@@ -170,16 +193,22 @@ export function FindingGatePanel({ findingId, readOnly = false }: { findingId: s
 
 function PocSection({
   poc,
+  replays,
   readOnly,
   busy,
+  replayBusy,
   onSave,
   onDelete,
+  onReplay,
 }: {
   poc: GatePoc | null;
+  replays: GatePocReplay[];
   readOnly: boolean;
   busy: boolean;
+  replayBusy: boolean;
   onSave: (p: GatePoc) => void;
   onDelete: () => void;
+  onReplay: () => void;
 }) {
   const [form, setForm] = React.useState<GatePoc>({
     kind: "http",
@@ -188,19 +217,37 @@ function PocSection({
     observed: "",
     reproduced: 0,
     evidence: "",
+    expect_status: 0,
+    expect_body_contains: [],
   });
+  // 预期响应片段用逗号分隔的文本框（提交时再拆成数组），避免为数组做子表单。
+  const [bodyHints, setBodyHints] = React.useState("");
   React.useEffect(() => {
-    if (poc) setForm(poc);
+    if (!poc) return;
+    setForm(poc);
+    setBodyHints((poc.expect_body_contains ?? []).join(", "));
   }, [poc]);
 
   const set = <K extends keyof GatePoc>(k: K, val: GatePoc[K]) => setForm((f) => ({ ...f, [k]: val }));
+  const submit = () =>
+    onSave({
+      ...form,
+      expect_body_contains: bodyHints
+        .split(/[,，\s]+/)
+        .map((s) => s.trim())
+        .filter(Boolean),
+    });
+  const canReplay = Boolean(poc) && poc?.kind === "http" && !readOnly;
+  const expectReady = (poc?.expect_status ?? 0) > 0;
 
   return (
     <Card>
       <CardHeader className="flex-row items-center justify-between">
         <div>
           <CardTitle className="text-sm">门三 · 触发验证（PoC）</CardTitle>
-          <CardDescription>无 PoC 不算 finding：写清怎么触发、看到了什么、连续复现几次。</CardDescription>
+          <CardDescription>
+            无 PoC 不算 finding：写清怎么触发、看到了什么、连续复现几次。给出可机器判定的预期后可让平台代跑重放。
+          </CardDescription>
         </div>
         {poc && !readOnly ? (
           <Button variant="ghost" size="sm" onClick={onDelete} disabled={busy}>
@@ -243,7 +290,7 @@ function PocSection({
         </div>
         <div className="grid gap-3 lg:grid-cols-2">
           <div className="flex flex-col gap-1.5">
-            <Label>复现步骤（可复制粘贴）</Label>
+            <Label>复现步骤（可复制粘贴的 HTTP 请求或命令）</Label>
             <Textarea
               rows={4}
               className="font-mono text-xs"
@@ -253,7 +300,7 @@ function PocSection({
             />
           </div>
           <div className="flex flex-col gap-1.5">
-            <Label>预期结果</Label>
+            <Label>预期结果（人读）</Label>
             <Textarea
               rows={2}
               value={form.expected}
@@ -269,11 +316,70 @@ function PocSection({
             />
           </div>
         </div>
-        {!readOnly ? (
-          <div className="flex justify-end">
-            <Button size="sm" disabled={busy} onClick={() => onSave(form)}>
-              {busy ? <Spinner /> : null} 保存 PoC
-            </Button>
+        <div className="grid gap-3 rounded-md border border-dashed p-3 sm:grid-cols-2">
+          <div className="flex flex-col gap-1.5">
+            <Label>机器可判预期 · HTTP 状态码</Label>
+            <Input
+              type="number"
+              min={0}
+              max={599}
+              placeholder="例如 200"
+              value={form.expect_status ?? 0}
+              disabled={readOnly}
+              onChange={(e) => set("expect_status", Number(e.target.value) || 0)}
+            />
+            <p className="text-xs text-muted-foreground">
+              填了它平台才能代跑重放并自动判定「这次是不是真的复现」；不填只能靠人工计数。
+            </p>
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <Label>机器可判预期 · 响应体须包含</Label>
+            <Input
+              placeholder="用逗号分隔，例如 admin, user_id"
+              value={bodyHints}
+              disabled={readOnly}
+              onChange={(e) => setBodyHints(e.target.value)}
+            />
+            <p className="text-xs text-muted-foreground">
+              大小写不敏感的包含匹配；保守一点，只写能证明漏洞存在的最短片段。
+            </p>
+          </div>
+        </div>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="text-xs text-muted-foreground">
+            重放走录制代理（受 L3 范围/语义/预算管控），只有 kind=http 能代跑；command/file/sample
+            涉及在宿主机执行代码，平台不代跑。
+          </p>
+          <div className="flex items-center gap-2">
+            {canReplay ? (
+              <Button size="sm" variant="outline" disabled={busy || replayBusy || !expectReady} onClick={onReplay}>
+                {replayBusy ? <Spinner /> : <PlayIcon className="size-3.5" />} 平台重放
+              </Button>
+            ) : null}
+            {!readOnly ? (
+              <Button size="sm" disabled={busy} onClick={submit}>
+                {busy ? <Spinner /> : null} 保存 PoC
+              </Button>
+            ) : null}
+          </div>
+        </div>
+        {poc && !expectReady ? (
+          <p className="text-xs text-amber-600">该 PoC 还没有 expect_status：补上并保存后可点「平台重放」。</p>
+        ) : null}
+        {replays.length ? (
+          <div className="flex flex-col gap-1.5 border-t pt-3">
+            <Label>重放历史（由平台发包，机器判定）</Label>
+            <ul className="flex flex-col gap-1 text-xs">
+              {replays.map((r, i) => (
+                <li key={r.id ?? i} className="flex flex-wrap items-center gap-2 font-mono">
+                  <Badge variant={r.matched ? "default" : "destructive"}>{r.matched ? "一致" : "不一致"}</Badge>
+                  <span>HTTP {r.status_code}</span>
+                  {r.traffic_id ? <span className="text-muted-foreground">traffic={r.traffic_id}</span> : null}
+                  <span className="text-muted-foreground">{r.detail}</span>
+                  <span className="text-muted-foreground">{new Date(r.created_at).toLocaleString()}</span>
+                </li>
+              ))}
+            </ul>
           </div>
         ) : null}
       </CardContent>

@@ -1741,6 +1741,20 @@ export interface GatePoc {
   observed: string;
   reproduced: number;
   evidence: string;
+  // 机器可判的预期：有了它平台才能代跑重放并自动判定是否复现。
+  expect_status?: number;
+  expect_body_contains?: string[];
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface GatePocReplay {
+  id?: number;
+  traffic_id: string;
+  status_code: number;
+  matched: boolean;
+  detail: string;
+  created_at: string;
 }
 
 export interface GateVerdict {
@@ -1752,6 +1766,9 @@ export interface GateVerdict {
   novelty_queries: number;
   source_classes: number;
   poc_reproductions: number;
+  poc_replays?: number;
+  poc_replay_matched?: number;
+  notes?: string[];
 }
 
 export interface FindingGateRequirements {
@@ -1767,5 +1784,6 @@ export interface FindingGate {
   counterexamples: GateCounterexample[];
   novelty_checks: GateNoveltyCheck[];
   poc: GatePoc | null;
+  poc_replays?: GatePocReplay[];
   requirements: FindingGateRequirements;
 }

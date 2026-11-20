@@ -1473,3 +1473,21 @@ CREATE TABLE IF NOT EXISTS finding_pocs (
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- 平台代执行的 PoC 重放记录。与 finding_pocs（人工/agent 录入的最新结论）分开：
+-- 重放是"机器证据"，保留每一次尝试，便于看出 PoC 是否稳定、是否只是偶发。
+CREATE TABLE IF NOT EXISTS finding_poc_replays (
+    id          BIGSERIAL PRIMARY KEY,
+    finding_id  BIGINT NOT NULL REFERENCES findings(id) ON DELETE CASCADE,
+    traffic_id  TEXT NOT NULL DEFAULT '',  -- 录制代理落下的真实流量 id（取到才有）
+    status_code INT NOT NULL DEFAULT 0,
+    matched     BOOLEAN NOT NULL DEFAULT FALSE,  -- 是否与 expect_status/expect_body_contains 一致
+    detail      TEXT NOT NULL DEFAULT '',        -- 人可读摘要：耗时/字节数/不一致项
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_finding_poc_replays_finding ON finding_poc_replays(finding_id, id DESC);
+
+-- 门三的机器可判预期：只有填了 expect_status，平台才能代执行重放并自动判定
+-- "这次到底复现没有"。手写的 expected 是给人看的，不能拿来判定。
+ALTER TABLE finding_pocs ADD COLUMN IF NOT EXISTS expect_status INT NOT NULL DEFAULT 0;
+ALTER TABLE finding_pocs ADD COLUMN IF NOT EXISTS expect_body_contains TEXT NOT NULL DEFAULT '';
