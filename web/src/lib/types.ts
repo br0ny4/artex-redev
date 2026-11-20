@@ -1711,3 +1711,59 @@ export interface PolicyDecision {
   prev_hash: string;
   hash: string;
 }
+
+// 0day 准入门（vulngate）：三条门的结构化记录。字段名与 Go 侧 json tag 一一对应。
+export interface GateCounterexample {
+  id?: number;
+  ordinal?: number;
+  claim: string;
+  method: string;
+  expected: string;
+  observed: string;
+  passed: boolean;
+  evidence: string;
+}
+
+export interface GateNoveltyCheck {
+  id?: number;
+  query: string;
+  source_class: string;
+  hits: string[];
+  same_vuln: boolean;
+}
+
+export interface GatePoc {
+  kind: string;
+  input: string;
+  expected: string;
+  observed: string;
+  reproduced: number;
+  evidence: string;
+}
+
+export interface GateVerdict {
+  state: "passed" | "blocked";
+  reasons?: string[];
+  passed_counterexamples: number;
+  failed_counterexamples: number;
+  distinct_vectors: number;
+  novelty_queries: number;
+  source_classes: number;
+  poc_reproductions: number;
+}
+
+export interface FindingGateRequirements {
+  min_counterexamples: number;
+  min_novelty_queries: number;
+  min_source_classes: number;
+  min_reproductions: number;
+}
+
+export interface FindingGate {
+  finding_id: number;
+  gate: GateVerdict;
+  counterexamples: GateCounterexample[];
+  novelty_checks: GateNoveltyCheck[];
+  poc: GatePoc | null;
+  requirements: FindingGateRequirements;
+}

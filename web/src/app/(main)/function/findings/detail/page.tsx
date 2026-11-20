@@ -9,6 +9,7 @@ import { ArrowLeftIcon, ArrowUpRightIcon, ShieldAlertIcon } from "lucide-react";
 import { toast } from "sonner";
 
 import { CopyButton } from "@/components/copy-button";
+import { FindingGatePanel } from "@/components/finding-gate-panel";
 import { FindingRetestPanel } from "@/components/finding-retest-panel";
 import { FindingTrafficPanel } from "@/components/finding-traffic-panel";
 import { Markdown } from "@/components/markdown";
@@ -153,6 +154,7 @@ function FindingDetailInner() {
         </div>
         <TabsList>
           <TabsTrigger value="overview">概览</TabsTrigger>
+          <TabsTrigger value="gate">准入</TabsTrigger>
           <TabsTrigger value="lineage">链路图</TabsTrigger>
         </TabsList>
       </header>
@@ -323,6 +325,11 @@ function FindingDetailInner() {
               </CardContent>
             </Card>
           </div>
+        </TabsContent>
+
+        {/* 准入：0day 三道门（PoC / 反例 / 撞车），导出前强制 */}
+        <TabsContent value="gate" className="mt-0">
+          <FindingGatePanel key={id} findingId={id} readOnly={finding.inherited} />
         </TabsContent>
 
         {/* 链路图：从任务初始节点回溯到本漏洞节点的攻击链路 */}

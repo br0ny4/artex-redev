@@ -194,6 +194,9 @@ export ARTEX_ENGAGEMENT_FILE=./policy/source-audit/deployment-context.yaml
 - 被审计源码只读：原地改源码命中红线，补丁与 PoC 只能写进产物目录。
 - `ssh`/`scp`/`rsync`/`nc`/`curl`/`wget` 等外传类命令默认禁用；`git push` 归 D 类需显式授权。
 - 接 `semgrep mcp` / 本地 MCP 审计服务器见 3.5，工具调用仍走 guard 判定。
+- **提交 0day 前必须过三道门**（漏洞详情 → 「准入」页录入，或直接调接口）：一份可复现的 PoC
+  （≥2 次连续复现）、≥5 条反例、≥3 次跨 ≥2 类信息源的撞车比对；未过门的 finding 导出报告
+  会被 409 拦下。规则见 [08](docs/redev/08-0day-pipeline.md)。
 
 ### 3.8 样本分诊（malware-triage 域包）
 

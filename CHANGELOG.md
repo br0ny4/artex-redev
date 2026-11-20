@@ -20,6 +20,8 @@
   - 接口：`GET /api/exploration/findings/{id}/gate`、`POST …/gate/counterexamples`、
     `POST …/gate/novelty`、`PUT …/gate/poc`（均支持撤回删除）；判定逻辑在纯 Go 包 `vulngate/`，可单测。设计见
     [`docs/redev/08-0day-pipeline.md`](docs/redev/08-0day-pipeline.md)。
+- **漏洞详情新增「准入」页**：三道门的完成度、还差什么的逐条原因，以及 PoC / 反例 / 撞车检索的
+  录入与撤回表单——操作员不用再靠 curl 登记；判定仍是服务端强制，前端只负责录入与展示。
 
 ### 测试
 

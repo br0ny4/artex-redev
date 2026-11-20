@@ -40,7 +40,11 @@ import type {
   FindingDeepenResponse,
   FindingGroupsPage,
   FindingQuery,
+  FindingGate,
   FindingRetest,
+  GateCounterexample,
+  GateNoveltyCheck,
+  GatePoc,
   FindingStats,
   FindingStatus,
   FindingsPage,
@@ -677,6 +681,24 @@ export const api = {
   ) => patch<Finding>(`/exploration/findings/${id}`, fields),
   // 删除漏洞:移除 findings 记录 + 来源探索节点(从发现列表/任务发现 Tab/探索图一并消失)。
   deleteFinding: (id: string) => del<{ deleted: boolean; id: number }>(`/exploration/findings/${id}`),
+  // 0day 准入（三道门）：查询/录入/撤回。未过门导出会在服务端被 409 拦下。
+  findingGate: (id: string) => get<FindingGate>(`/exploration/findings/${encodeURIComponent(id)}/gate`),
+  addFindingCounterexample: (
+    id: string,
+    body: Omit<GateCounterexample, "id" | "ordinal">,
+  ) => post<FindingGate>(`/exploration/findings/${encodeURIComponent(id)}/gate/counterexamples`, body),
+  deleteFindingCounterexample: (id: string, ceid: number) =>
+    del<{ deleted: boolean }>(
+      `/exploration/findings/${encodeURIComponent(id)}/gate/counterexamples/${ceid}`,
+    ),
+  addFindingNoveltyCheck: (id: string, body: Omit<GateNoveltyCheck, "id">) =>
+    post<FindingGate>(`/exploration/findings/${encodeURIComponent(id)}/gate/novelty`, body),
+  deleteFindingNoveltyCheck: (id: string, nid: number) =>
+    del<{ deleted: boolean }>(`/exploration/findings/${encodeURIComponent(id)}/gate/novelty/${nid}`),
+  setFindingPoc: (id: string, body: GatePoc) =>
+    put<FindingGate>(`/exploration/findings/${encodeURIComponent(id)}/gate/poc`, body),
+  deleteFindingPoc: (id: string) =>
+    del<{ deleted: boolean }>(`/exploration/findings/${encodeURIComponent(id)}/gate/poc`),
   findingRetests: (id: string) =>
     get<{ retests: FindingRetest[] }>(`/exploration/findings/${encodeURIComponent(id)}/retests`).then((r) =>
       arr(r.retests),
