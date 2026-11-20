@@ -1722,6 +1722,8 @@ export interface GateCounterexample {
   observed: string;
   passed: boolean;
   evidence: string;
+  // 可选：引用的真实流量 id，录入时服务端逐个核对存在性。
+  traffic_ids?: string[];
 }
 
 export interface GateNoveltyCheck {

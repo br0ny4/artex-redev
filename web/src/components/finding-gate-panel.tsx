@@ -300,6 +300,7 @@ function CounterexampleSection({
     expected: "",
     observed: "",
     evidence: "",
+    traffic_ids: "",
     passed: true,
   });
   return (
@@ -361,6 +362,11 @@ function CounterexampleSection({
                 value={form.evidence}
                 onChange={(e) => setForm({ ...form, evidence: e.target.value })}
               />
+              <Input
+                placeholder="引用的真实流量 id，逗号分隔（可选）"
+                value={form.traffic_ids}
+                onChange={(e) => setForm({ ...form, traffic_ids: e.target.value })}
+              />
               <span className="flex items-center gap-2 text-sm">
                 <Checkbox
                   id="ce-passed"
@@ -375,8 +381,27 @@ function CounterexampleSection({
                 size="sm"
                 disabled={busy}
                 onClick={() => {
-                  onAdd(form);
-                  setForm({ claim: "", method: "", expected: "", observed: "", evidence: "", passed: true });
+                  onAdd({
+                    claim: form.claim,
+                    method: form.method,
+                    expected: form.expected,
+                    observed: form.observed,
+                    evidence: form.evidence,
+                    passed: form.passed,
+                    traffic_ids: form.traffic_ids
+                      .split(/[,，\s]+/)
+                      .map((v: string) => v.trim())
+                      .filter(Boolean),
+                  });
+                  setForm({
+                    claim: "",
+                    method: "",
+                    expected: "",
+                    observed: "",
+                    evidence: "",
+                    traffic_ids: "",
+                    passed: true,
+                  });
                 }}
               >
                 {busy ? <Spinner /> : null} 添加反例
