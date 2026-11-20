@@ -108,7 +108,7 @@ Go 文件 354 → 369
 新增 HTTP 端点 12 个：policy holds ×2（列表/答复）、mcp presets、finding gate ×9
 （门状态查询、反例增删、撞车记录增删、撞车平台代检、PoC 写入/删除、PoC 平台重放）
 （status/decisions/chain 三个端点发布快照时已有）
-新增测试函数 54 个（policy 包 51 个测试函数；vulngate 17 个；novelty 5 个）
+新增测试函数 58 个（policy 包 51 个；vulngate 17 个；novelty 5 个；docscheck 1 个）
 ```
 
 ## 8. 没有改的部分（避免误读为"全重写"）

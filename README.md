@@ -56,7 +56,21 @@ FLASH 通报，全球金融/政府/科技/国防等行业受影响；公网上�
 | 审计 | 工具调用审计环 | 判定全量落 `policy_decisions`（hash chain），可校验完整性 |
 | 文档 | — | `docs/redev/`：滥用态势、代码地图、工具选型、策略引擎设计、决策记录 |
 
-更细的差异见 [`docs/redev/05-decisions.md`](docs/redev/05-decisions.md)。
+更细的差异见 [`docs/redev/09-diff-from-upstream.md`](docs/redev/09-diff-from-upstream.md)（逐项对照）
+与 [`docs/redev/05-decisions.md`](docs/redev/05-decisions.md)（决策记录）。
+
+## 定位与守则
+
+上游的骨架（多角色编排、探索图、全量流量录制、findings 与流量快照绑定）我们**一行没改**——
+那是它真正的价值，也是"结论可回放到具体请求"的前提。这个 fork 只在两根轴上收紧：
+
+1. **边界为真**：没有授权记录就发不出包，判不清就全量停止，录制不可关闭；
+2. **证据机器化**：0day 结论必须过三道门（PoC 可复现 + ≥5 条反例 + ≥3 次跨源撞车比对），
+   其中 PoC 可由平台经录制代理重放、撞车检索可由平台代查 NVD / CISA KEV。
+
+为什么这样切、守什么/改什么、以及诚实的风险登记，见
+[`docs/redev/10-positioning.md`](docs/redev/10-positioning.md)。该文档里的代码坐标、接口与
+测试锚点由 `internal/docscheck` 在 CI 里校验——改代码不改文档会红，避免"定位"变成过时叙事。
 
 ## 计划与进展
 

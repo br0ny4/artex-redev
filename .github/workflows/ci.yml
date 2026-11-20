@@ -50,7 +50,7 @@ jobs:
         run: |
           set -e
           files="$(gofmt -l $(git ls-files 'policy/*.go' 'traffic/policy*.go' 'guard/*.go' \
-            'server/login_limiter*.go' 'server/policy_*.go' 'db/policy_*.go'))"
+            'server/login_limiter*.go' 'server/policy_*.go' 'db/policy_*.go' 'internal/*.go' 'novelty/*.go'))"
           if [ -n "$files" ]; then
             echo "以下文件需要 gofmt -w："
             echo "$files"

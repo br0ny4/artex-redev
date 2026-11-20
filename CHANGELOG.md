@@ -50,6 +50,8 @@
   断言范围外目标返回 403 + `X-ArtEx-Policy`、阻断说明含"平台管控"、尝试进了流量索引。
   用不存在的 `.invalid` 域名做目标：若代理把请求转发出去过，会得到 502 而不是 403——
   单测只能证明"判定返回 deny"，这个用例证明"代理真的没发包"。
+- **录制锁**：启用规范执行层后 `SetTrafficEnabled(false)` 必须报错且录制保持开启，不能再出现"报错但已关掉"
+  （`server/policy_capture_lock_test.go`，此前只有实现没有回归锚点）。
 
 ### 新增
 
@@ -90,6 +92,12 @@
   `engagement_requirements`：在线域要求测试账号，离线域不要求（离线作业没有登录/通知/资金动作，
   强填只会逼使用者造一个假账号）。漏写该字段仍按在线域（最严）校验。
 - 部署上下文可从 `ARTEX_ENGAGEMENT_FILE` 指向任一域包的模板；`engagement.pack` 决定策略。
+
+### 文档
+
+- 新增 [`docs/redev/10-positioning.md`](docs/redev/10-positioning.md)：定位（上游=自动渗透 Agent / 本仓库=作业台）、
+  为什么选 ARTEX、骨架不改清单、只收紧的两根轴、风险登记与评审清单；README / 05-decisions（D9）/ 09-diff 互相链接。
+- 定位文档不是"叙事"：`internal/docscheck` 在 CI 里校验其中每个代码坐标、接口与测试锚点，文档与代码脱节会红。
 
 ### 修复
 
