@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/br0ny4/artex-redev/vulngate"
 )
@@ -32,9 +33,10 @@ func (d *DB) AddFindingCounterexample(ctx context.Context, findingID int64, c vu
 		}
 	}
 	err := d.QueryRowContext(ctx, `
-		INSERT INTO finding_counterexamples (finding_id, ordinal, claim, method, expected, observed, passed, evidence)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,
-		findingID, c.Ordinal, c.Claim, c.Method, c.Expected, c.Observed, c.Passed, c.Evidence).Scan(&c.ID)
+		INSERT INTO finding_counterexamples (finding_id, ordinal, claim, method, expected, observed, passed, evidence, traffic_ids)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`,
+		findingID, c.Ordinal, c.Claim, c.Method, c.Expected, c.Observed, c.Passed, c.Evidence,
+		strings.Join(c.TrafficIDs, ",")).Scan(&c.ID)
 	return c, err
 }
 
@@ -53,7 +55,7 @@ func (d *DB) DeleteFindingCounterexample(ctx context.Context, findingID, id int6
 // ListFindingCounterexamples 按 ordinal 升序返回一条 finding 的反例。
 func (d *DB) ListFindingCounterexamples(ctx context.Context, findingID int64) ([]vulngate.Counterexample, error) {
 	rows, err := d.QueryContext(ctx, `
-		SELECT id, ordinal, claim, method, expected, observed, passed, evidence
+		SELECT id, ordinal, claim, method, expected, observed, passed, evidence, traffic_ids
 		FROM finding_counterexamples WHERE finding_id=$1 ORDER BY ordinal, id`, findingID)
 	if err != nil {
 		return nil, err
@@ -62,8 +64,12 @@ func (d *DB) ListFindingCounterexamples(ctx context.Context, findingID int64) ([
 	var out []vulngate.Counterexample
 	for rows.Next() {
 		var c vulngate.Counterexample
-		if err := rows.Scan(&c.ID, &c.Ordinal, &c.Claim, &c.Method, &c.Expected, &c.Observed, &c.Passed, &c.Evidence); err != nil {
+		var trafficIDs string
+		if err := rows.Scan(&c.ID, &c.Ordinal, &c.Claim, &c.Method, &c.Expected, &c.Observed, &c.Passed, &c.Evidence, &trafficIDs); err != nil {
 			return nil, err
+		}
+		if trafficIDs != "" {
+			c.TrafficIDs = strings.Split(trafficIDs, ",")
 		}
 		out = append(out, c)
 	}

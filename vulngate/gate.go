@@ -51,6 +51,9 @@ type Counterexample struct {
 	Observed string `json:"observed"` // 实际观察到的结果（与 Expected 对照）
 	Passed   bool   `json:"passed"`   // 反例成立（漏洞未出现）→ true
 	Evidence string `json:"evidence"` // 流量 id / 命令输出摘要等可核对凭据
+	// TrafficIDs 是凭据里引用的真实流量 id。判定逻辑不校验它（离线域没有流量），
+	// 但录入接口会核对存在性——"编一个 id"过不了服务端。
+	TrafficIDs []string `json:"traffic_ids,omitempty"`
 }
 
 // NoveltyCheck 是一次撞车比对查询。

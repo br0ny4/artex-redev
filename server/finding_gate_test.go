@@ -192,3 +192,17 @@ func TestFindingNoveltyRejectsUnknownSourceClass(t *testing.T) {
 }
 
 var _ = httptest.NewRecorder
+
+// TestFindingCounterexampleRejectsBogusTrafficID 验证反例凭据核对：引用不存在的
+// traffic id 会被拒。没有这道检查，"编一个流量 id 写在 evidence 里"就能过录入。
+func TestFindingCounterexampleRejectsBogusTrafficID(t *testing.T) {
+	_, f, req := trafficEvidenceServer(t)
+	body := `{"claim":"凭据核对","method":"伪造流量 id","expected":"400","observed":"400","passed":true,"evidence":"traffic: does-not-exist","traffic_ids":["does-not-exist"]}`
+	w := req("POST", fmt.Sprintf("/api/exploration/findings/%d/gate/counterexamples", f.FindingID), body)
+	if w.Code != 400 {
+		t.Fatalf("伪造 traffic id 应 400，得到 %d %s", w.Code, w.Body)
+	}
+	if !strings.Contains(w.Body.String(), "不在流量索引") {
+		t.Fatalf("错误信息应说明流量 id 不存在：%s", w.Body)
+	}
+}

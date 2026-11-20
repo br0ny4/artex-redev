@@ -1445,6 +1445,9 @@ CREATE TABLE IF NOT EXISTS finding_counterexamples (
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_finding_counterexamples_finding ON finding_counterexamples(finding_id, ordinal);
+-- traffic_ids：反例凭据里引用的真实流量 id（逗号分隔）。由服务端核对存在性后落库，
+-- 这样"编一个 id"过不了门（后续可升级为强制要求）。
+ALTER TABLE finding_counterexamples ADD COLUMN IF NOT EXISTS traffic_ids TEXT NOT NULL DEFAULT '';
 
 CREATE TABLE IF NOT EXISTS finding_novelty_checks (
     id           BIGSERIAL PRIMARY KEY,

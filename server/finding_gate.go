@@ -65,6 +65,8 @@ type counterexamplePayload struct {
 	Observed string `json:"observed"`
 	Passed   bool   `json:"passed"`
 	Evidence string `json:"evidence"`
+	// TrafficIDs 是可选的真实流量 id 引用；给了就必须在流量索引里存在。
+	TrafficIDs []string `json:"traffic_ids"`
 }
 
 // addFindingCounterexample 追加一条反例。缺字段直接 400 并说明缺哪个——
@@ -97,9 +99,27 @@ func (s *Server) addFindingCounterexample(w http.ResponseWriter, r *http.Request
 			"（claim=要排除的误报路径, method=验证手法, expected=正常应观察到什么, observed=实际观察到什么, evidence=流量 id/命令输出）")
 		return
 	}
+	// 凭据核对：允许引用真实流量 id，但引用的必须是真实抓到的流量。这样
+	// "随手编一个 id" 过不了录入；离线域不强制（没有流量）。
+	trafficIDs := make([]string, 0, len(p.TrafficIDs))
+	for _, raw := range p.TrafficIDs {
+		tid := strings.TrimSpace(raw)
+		if tid == "" {
+			continue
+		}
+		if s.m.traffic == nil {
+			writeErr(w, 400, "当前没有可用的流量索引，不能核对反例凭据 traffic id="+tid)
+			return
+		}
+		if _, _, err := s.m.traffic.Get(tid); err != nil {
+			writeErr(w, 400, "反例凭据 traffic id="+tid+" 不在流量索引中：凭据必须是真实抓到的流量")
+			return
+		}
+		trafficIDs = append(trafficIDs, tid)
+	}
 	ce, err := s.m.pg.AddFindingCounterexample(r.Context(), id, vulngate.Counterexample{
 		Ordinal: p.Ordinal, Claim: p.Claim, Method: p.Method, Expected: p.Expected,
-		Observed: p.Observed, Passed: p.Passed, Evidence: p.Evidence,
+		Observed: p.Observed, Passed: p.Passed, Evidence: p.Evidence, TrafficIDs: trafficIDs,
 	})
 	if err != nil {
 		if err == db.ErrFindingNotFound {

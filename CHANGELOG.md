@@ -17,6 +17,7 @@
     一条 finding 只保留最新一份 PoC（覆盖式写入，避免报告里出现多份互相矛盾的"能复现"）。
   - 强制点在导出出口：未过门的 finding 导出返回 409 并逐条给出原因；`force=1&reason=…` 可逐次放行并记日志，
     `ARTEX_FINDING_GATE=off` 是迁移旧数据的逃生口。
+  - 反例凭据可引用 `traffic_ids`：录入时服务端核对流量索引，编造的 id 直接 400。
   - 接口：`GET /api/exploration/findings/{id}/gate`、`POST …/gate/counterexamples`、
     `POST …/gate/novelty`、`PUT …/gate/poc`（均支持撤回删除）；判定逻辑在纯 Go 包 `vulngate/`，可单测。设计见
     [`docs/redev/08-0day-pipeline.md`](docs/redev/08-0day-pipeline.md)。
