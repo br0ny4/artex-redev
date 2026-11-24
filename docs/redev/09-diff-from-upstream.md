@@ -60,6 +60,7 @@
 | `web-pentest` | 在线渗透（继承上游能力） | 测试账号准入、接口语义分级、范围清单制 |
 | `binary-re` | 样本/固件深度逆向、漏洞定位 | 情报回源白名单、禁宿主模拟器、送检需授权（R12/R13） |
 | `source-audit` | 源码审计、0day 挖掘 | 授权范围=目录清单（`local_paths`）、默认零出网、被审计源码只读（R14/R15） |
+| `bounty-recon` | 赏金项目"先测绘后打点" | **只看不动**：无测试账号（C/D/E 无合法通道）、`vuln_samples/send_actions=0`、扫描器突发 0；L3 `R8_intel_read` 只对情报源放行只读方法 |
 | `malware-triage` | 应急第一小时批量分诊 | **一律不执行样本**（R13 `execute_sample_at_all`）、分诊工具白名单、更紧预算 |
 
 每个域包 = `policy.yaml`（红线/预算/工具白名单）+ `verb-lexicon.yaml`（域内动作词表）
@@ -105,12 +106,12 @@
 24 commits / 92 files changed / +5,977 −191
 新增文件 29（其中 Go 15、域包 YAML 9、文档 3、工作流 1、前端页 1）
 Go 文件 354 → 369
-新增代码：policy/ 4,593 行（含测试）、vulngate/ 739、novelty/ 408、vulnpipe/ 约 300、server 策略/门/候选约 2,400、db 约 900、traffic 382
+新增代码：policy/ 约 5,000 行（含测试）、vulngate/ 739、novelty/ 408、vulnpipe/ 约 300、server 策略/门/候选约 2,400、db 约 900、traffic 382
 新增 HTTP 端点 20 个：policy holds ×2（列表/答复）、mcp presets、finding gate ×10
 （门状态查询、反例增删、撞车记录增删、撞车平台代检、撞车复核、PoC 写入/删除、PoC 平台重放）、
 候选 ×7（列表/新建/详情/加跳/删跳/改状态/转结论）
 （status/decisions/chain 三个端点发布快照时已有）
-新增测试函数 76 个（相对基线）：policy +18、vulngate +20、novelty +6、vulnpipe +3、server +24、db +2、agent +1、traffic +1、docscheck +1
+新增测试函数 80 个（相对基线）：policy +22、vulngate +20、novelty +6、vulnpipe +3、server +24、db +2、agent +1、traffic +1、docscheck +1
 （包内总量：policy 53、vulngate 20、novelty 6、vulnpipe 3）
 ```
 

@@ -37,6 +37,14 @@
   - 接口：`GET /api/exploration/findings/{id}/gate`、`POST …/gate/counterexamples`、
     `POST …/gate/novelty`、`PUT …/gate/poc`（均支持撤回删除）；判定逻辑在纯 Go 包 `vulngate/`，可单测。设计见
     [`docs/redev/08-0day-pipeline.md`](docs/redev/08-0day-pipeline.md)。
+- **在线侦察域 `bounty-recon`（赏金/众测的"只看不动"）**：新增域包
+  `policy/bounty-recon/{policy.yaml,verb-lexicon.yaml,deployment-context.example.yaml}`。
+  与在线测试域共用执行层，但 `engagement_requirements.test_accounts: false`（无账号即无写通道）、
+  `budget.vuln_samples/send_actions/test_accounts: 0`、`scanner_burst_max: 0`、读预算 4000 次/任务 3 rps；
+  词表把"枚举/发现/爬取/收割/子域/资产"等只读侦察动词明确归入 F 类（否则会被判 unknown 而拒）。
+  L3 新增显式情报源只读规则：`egress_allowlist_extra` 里的主机（模板为 crt.sh / urlscan / OTX）
+  只放行 GET/HEAD/OPTIONS（`R8_intel_read`），写入直接拒（`R8_egress_write`），判定在 DNS 归属判定之前
+  （`Scope.EgressIntelOnly`），仍计预算、仍受响应体截断与敏感特征替换。
 - **0day 流水线阶段 2–3 结构化工件（候选 → 可达性 → 结论）**：新增 `vulnpipe` 包与
   `vuln_candidates` / `vuln_candidate_hops` 表，agent 用 `add_candidate` 登记"值得验证的路径"
   （位置、入口→sink 每跳证据），平台在每次读取时逐跳核对：在线域每跳必须是真实存在的流量 id，
@@ -66,6 +74,9 @@
 
 ### 测试
 
+- **在线侦察域**：包配置断言（spec.id、无测试账号、`vuln_samples/send_actions=0`、情报源白名单、带外为空、
+  `zmap` 默认禁用）；情报源只读判定（GET crt.sh 放行、POST crt.sh 拒、非白名单外网主机不放行）；
+  按模板装引擎后 pack=bounty-recon、强制录制、情报源可用（`policy/packs_test.go`）。
 - **宿主机边界**：离线域放行 `python -c` 一次性计算、样本内 `shadow` 字样、`rm -rf /tmp/...`、
   `dd of=/dev/null`、连 `127.0.0.1`；仍拒 `rm -rf /`、`rm -rf /etc`、`dd of=/dev/sda`、`mkfs`、
   `shutdown`、`chmod -R 777 /`、内联载荷里的删根/读 shadow、`cat ~/.ssh/id_rsa`、执行授权目录内样本

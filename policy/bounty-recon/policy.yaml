@@ -1,0 +1,245 @@
+# =====================================================================
+# 在线侦察域策略包（bounty_recon）— 机器可读执行配置
+#
+# 定位：赏金项目的"只看不动"阶段——子域/资产/JS/API 收割、变化监控。
+#   与 web_pentest 共用一个执行层（L1 命令出口 + L3 请求判定 + 预算/Stop-All），
+#   但预算与语义约束按"侦察"重新收紧：
+#     - 不验证漏洞（vuln_samples = 0），不发起任何写操作（C/D/E 无测试账号 → 拒）；
+#     - 允许查询 passive intel 源（crt.sh / urlscan / OTX），出网仍走代理并记账；
+#     - 预算向"读"倾斜（4000 次/任务），但速率更低（3 rps），禁止扫描器突发。
+#
+# 依据：policy/spec/SRC行业授权资产安全测试规范-Agent版.md
+# 原则：本文件是【工程层硬约束】的配置源，不是提示词。
+# =====================================================================
+
+spec:
+  id: online-bounty-recon
+  version: "2.5"
+  handshake: "[RULES_LOADED v2.5]"   # 规范 9.1：首响应必须以它开头，否则视为未加载
+  fail_mode: closed                  # 规范 4.1 / 第九章：判不清 → 按禁止处理
+
+# 侦察域不需要测试账号：一旦出现 C/D/E 类（写）动作，因为没有账号兜底，
+# 语义章节会直接判 deny —— 这正是"只看不动"的工程表达。
+engagement_requirements:
+  test_accounts: false
+
+
+# 运行时要求：在线域：L3 判定发生在录制代理里，没有代理等于判定被绕过，必须强制录制。
+runtime:
+  requires_traffic_capture: true
+  environment: online                # 作业边界 + 宿主机边界都生效（内联解释器/回环仍按 6.4 约束）
+enforcement:
+  mode: hard                         # hard=违反即拦截并挂起；warn=只记录（仅限内部评测）
+  layers:                            # 任一层失守，其余层仍然拦得住
+    - sandbox_netns                  # 出口只留代理，raw socket 出不去
+    - request_proxy                  # mitmproxy addon：语义分级 + 预算 + 内容检查
+    - tool_guard                     # PreToolUse：命令 AST 判定、二进制黑名单 + 宿主机边界
+    - artifact_fs                    # 产物目录收口 + 报告后清理
+    - hold_controller                # 全量停止 + 操作员问答通道
+  on_violation:
+    action: deny
+    hold_task: true                  # 规范 7.3：停止是全量的，不是单接口
+    notify: operator
+
+# ---------------------------------------------------------------------
+# 第一章 授权范围
+# ---------------------------------------------------------------------
+scope:
+  require_deployment_context: true   # 规范 9.2：缺任一上下文项 → 只允许被动分析，不得发包
+  deny_by_default: true              # 1.2：未列入清单的资产/端口/服务一律范围外
+  allow: []                          # 由 deployment-context 注入（domain|ip|cidr|app|api）
+  exclude: []                        # 客户显式排除项，优先级高于 allow
+  ambiguous_as_out_of_scope: true    # 1.1：子域归属不明/第三方托管/CDN 回源/关联公司 → 范围外
+  third_party_detect:
+    cname_suffix:                    # 解析链命中即判"第三方托管"
+      - ".cloudfront.net"
+      - ".akamaiedge.net"
+      - ".aliyuncs.com"
+      - ".wscdns.com"
+      - ".akamai.net"
+      - ".cloudflare.net"
+      - ".fastly.net"
+      - ".azureedge.net"
+    asn_lookup: true
+    require_explicit: true           # 命中第三方托管时必须有显式 allow 条目才放行
+  internal_cidrs_deny:               # 1.2 / 红线 4：内网与横向预算为 0
+    - 10.0.0.0/8
+    - 172.16.0.0/12
+    - 192.168.0.0/16
+    - 127.0.0.0/8
+    - 169.254.0.0/16
+    - "::1/128"
+    - "fc00::/7"
+  metadata_deny: ["169.254.169.254", "fd00:ec2::254"]   # 6.7：只证明可达，不读凭据
+  out_of_band_allow_suffixes: []       # 侦察不主动触发带外回调，不开放 dnslog/collaborator
+  egress_allowlist_extra:             # 红线 8：除报告通道/带外域名外，只额外放行只读情报源
+    - crt.sh                          # 证书透明日志（子域枚举）
+    - urlscan.io                      # 公开扫描历史（JS/接口线索）
+    - api.urlscan.io
+    - otx.alienvault.com              # 公开威胁情报（IP/域名画像）
+  budget_expansion:                   # 1.3：越界信息只作证据，禁止顺藤摸瓜
+    reached_but_no_further_requests: true
+
+# ---------------------------------------------------------------------
+# 第二章 一票否决红线（每条对应一个可判定的动作谓词）
+# ---------------------------------------------------------------------
+redlines:
+  - id: R1_destructive
+    deny_when: request_class_in [A, B]
+  - id: R2_bulk_export
+    deny_when: response_rows_over_budget OR pagination_unbounded
+  - id: R3_dos
+    deny_when: rate_over_budget OR concurrency_over_budget OR retry_over_budget
+  - id: R4_internal_lateral
+    deny_when: resolved_ip_in_internal_cidrs OR lateral_probe
+  - id: R5_notify_real_user
+    deny_when: notify_action AND recipient_not_in_test_accounts
+  - id: R6_write_injection
+    deny_when: injection_class_in [write] AND tool_is_automated
+  - id: R7_public_write
+    deny_when: write_target_is_public_area
+  - id: R8_exfil
+    deny_when: egress_target_not_in [report_channel, oob_suffixes]
+  - id: R9_money
+    deny_when: benefit_or_payment_action
+  - id: R10_reuse_credentials               # 6.x / 5.5：拿到的凭据不得发起任何登录
+    deny_when: request_carries_harvested_credential
+  - id: R11_batch_ticket
+    deny_when: ticket_submission_batch
+
+# ---------------------------------------------------------------------
+# 第四章 接口语义分级（分类器输入：method + path + query + body，非名字）
+# ---------------------------------------------------------------------
+classes:
+  A_delete_clear_destroy:  deny      # 词表见 verb-lexicon.yaml A
+  B_overwrite_reset_merge: deny      # B
+  C_generic_modify:        restrict  # C：仅自建测试账号互测 + 可逆字段
+  D_state_transition:      restrict  # D：高危子类（资金/权益/公域）直接红线
+  E_create:                conditional  # E：仅测试账号 + 占位内容
+  F_read:                  allow     # F：按第五章数据预算
+  unknown:                 deny      # 判不清按禁止
+semantics:
+  match_surface: [method, path, query_keys, query_values, body_keys, body_values, headers]
+  apply_order: [rest_method, explicit_verb, param_switch, batch_pattern, chinese_pinyin, llm_fallback]
+  obfuscation_is_violation: true    # 4.1：换皮继续测 = 故意规避，直接红线
+  llm_fallback:
+    enabled: true
+    default_on_low_confidence: deny
+    log_decision: true
+
+# ---------------------------------------------------------------------
+# 第三章 工具与自动化 + 第五章数据预算（规范 5.3 默认值 + 第三章硬上限）
+# ---------------------------------------------------------------------
+budget:
+  # --- 规范 5.3 原表（客户可按项目收紧，不可放宽；放宽需书面记录）---
+  sql_proof: identity_functions        # 注入取证仅 user()/database()/version()
+  vuln_samples: 0                      # 侦察不验证漏洞：一有"有效样本"就说明越界了
+  internal_lateral_hosts: 0
+  send_actions: 0                      # 不向任何真实用户发送通知
+  pii_active_fetch: 5                  # 侦察读到 PII 就停，不主动拉取
+  response_body_max_mb: 10
+  test_accounts: 0                     # 没有测试账号 → 写操作在语义层就没有合法通道
+  # --- 第三章派生的执行上限（不在规范数值表内，取保守默认，客户可调）---
+  rate_rps_per_host: 3                 # 侦察量大但更慢，避免把目标打成压力测试
+  concurrency_per_host: 2
+  retry_max: 1
+  total_requests_per_task: 4000        # 读多写零：预算向拉取倾斜
+  scanner_burst_max: 0                 # 侦察不做扫描器突发
+  # --- 时间窗 ---
+  window: engagement_window            # 只能在授权时间窗内发包
+  stop_at_expiry: true
+
+tools:
+  default_deny_binaries:               # 第三章 3：白名单制，默认禁用，逐次申请
+    - nuclei
+    - ffuf
+    - dirsearch
+    - sqlmap
+    - hydra
+    - gobuster
+    - feroxbuster
+    - nikto
+    - masscan
+    - nmap
+    - zmap                             # 主动测绘同样走 raw socket，绕不过代理就该禁
+  approval: { scope: per_use, target_checked: true, read_only_only: true }
+  no_self_tuning: [rate, concurrency, timeout, retry]   # 第三章 2
+  no_probe_first: true                                 # 禁止"先跑起来看看"
+  script_requires_counters: true                       # 第三章 1：脚本必须内置计数并 exit
+  attribution: per_request                              # 第三章 4：工具/模型/操作者三方留痕
+
+# ---------------------------------------------------------------------
+# 第五章数据 + 第六章分类型细则
+# ---------------------------------------------------------------------
+response:
+  max_body_mb: 10
+  stop_on_secret_patterns: true        # 5.4：源码/配置/密钥/Token/DSN/shadow/私钥
+  secret_patterns_ref: policy/patterns/secret.txt
+  row_counting:
+    prefer_total_fields: true          # 5.1：用 total/count 证明规模，不拖数
+    sample_rows_max: 3
+  pii_detector: { enabled: true, min_hits_to_count: 3 }
+
+# 侦察域不进行漏洞验证；以下配置仅作"误触兜底"，命中即按红线处理。
+per_vuln:
+  xss:        { payload: console_log_only, ban_alert: true, public_area_write: deny }
+  upload:     { allow_webshell: true, exec_allowlist: [whoami, id, uname, hostname, ifconfig, ipconfig] }
+  rce:        { read_only_identity_only: true, forbid: [read_config, write, exfil, persist, privesc] }
+  file_read:  { harmless_paths: ["/etc/hosts", "C:\\Windows\\win.ini"], /etc/passwd: capability_only }
+  ssrf:       { internal_hosts: 0, metadata_read: deny }
+  sqli:       { union_business_data: deny, into_outfile: deny, stacked_write: deny }
+  sms:        { target: test_account_only, success_max: 5 }
+  csrf_cors:  { impact_others: deny }
+  logic:      { mechanism_only: true, execute_benefit: deny, cancel_after: true }
+
+# ---------------------------------------------------------------------
+# 第七章 终止与配合
+# ---------------------------------------------------------------------
+stop:
+  immediate_on:
+    - budget_exhausted
+    - secret_hit
+    - scope_uncertain
+    - platform_blocked
+    - unexpected_impact
+    - operator_hold
+  stop_all: true                       # 7.3：全量停止，含"顺手"只读探测
+  keep_context_for_report: true        # 保留上下文用于报告，不再据此测试
+  resume_requires: explicit_operator_answer
+  ambiguous_answer: ask_again
+  anomaly_detect:
+    http_5xx_rate: 0.2
+    waf_block_page: true
+    body_change_detect: true
+    notify_operator: true
+
+# ---------------------------------------------------------------------
+# 第八章 上报
+# ---------------------------------------------------------------------
+report:
+  required_fields:
+    - title
+    - vuln_class
+    - severity
+    - evidence            # 请求/响应原文、命令输出、脱敏截图
+    - repro_steps
+    - data_minimization_note
+    - cleanup_status      # 已清理 / 无法清理 + 位置与建议
+    - product_artifacts
+    - rating_basis        # 数据类型 + 规模 + 影响对象
+    - asset_scope         # 侦察域附加：本次涉及的资产/接口清单（资产图引用）
+  redact: [secret, pii, source_code, credential]
+  one_finding_one_report: true
+  rating: objective_only        # 不夸大 CVSS、不编造利用链
+  artifacts_dir: ./artifacts
+  purge_after_report: true
+
+# ---------------------------------------------------------------------
+# 第九章 附则
+# ---------------------------------------------------------------------
+compliance:
+  handshake_required: true
+  deployment_context_required: true
+  passive_only_when_context_missing: true
+  spec_version_pinned: "2.5"      # 已开始的测试按开始时版本执行
+  strict_interpretation: true     # 未尽事宜从严

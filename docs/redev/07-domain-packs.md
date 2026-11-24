@@ -1,7 +1,8 @@
 # 07 · 域包（domain pack）：同一套执行层，不同域策略
 
-> 状态：web-pentest ✅ / binary-re ✅ / source-audit ✅ / malware-triage ✅
-> 代码：`policy/embed.go`、`policy/{web-pentest,binary-re}/`、`policy/packs_test.go`
+> 状态：web-pentest ✅ / bounty-recon ✅ / binary-re ✅ / source-audit ✅ / malware-triage ✅
+> 代码：`policy/embed.go`、`policy/{web-pentest,bounty-recon,binary-re,source-audit,malware-triage}/`、
+> `policy/packs_test.go`
 
 ## 1. 为什么要域包
 
@@ -22,6 +23,19 @@
 | 出网 | 报告通道 + dnslog/collaborator | 情报回源白名单（VT/MB/OTX），其余全禁 |
 | 关键红线 | R1 破坏性、R8 外传、R10 凭据复用 | R8 产物出网、R12 未授权上传、R13 宿主机执行 |
 | 预算重点 | 请求数/速率/样本数/PII 条数 | 情报查询次数（默认 200/任务，1 rps） |
+
+第四个包 `bounty-recon` 面向赏金/众测的"先测绘、后打点"阶段：
+
+| | 在线侦察（bounty-recon） | 在线测试（web-pentest） |
+|---|---|---|
+| 目标 | program scope 内的域名/通配子域 | 客户授权的具体资产 + 测试账号 |
+| 动作 | 只看不动：枚举、爬取、JS/接口收割、变化监控 | 允许在测试账号与预算内验证漏洞 |
+| 写操作 | 无测试账号 → C/D/E 直接拒（`vuln_samples`/`send_actions` 全 0） | 测试账号 + 可逆字段 |
+| 出网 | 目标清单 + 公开情报源（crt.sh / urlscan / OTX）只读 | 目标清单 + 报告通道 + 带外域名 |
+| 关键红线 | R1 破坏性、R8 外传；扫描器突发预算 0 | 与侦察相同，另加漏洞验证细则 |
+
+侦察域与测试域共享执行层，但把"读写比"调成完全不同的形状：读多（4000 次/任务）、
+写零、速率更低（3 rps），并且把扫描器突发预算设成 0——侦察不是"先跑一遍扫描看看"。
 
 第三个包 `source-audit` 面向源码审计与 0day 挖掘（semgrep / Joern / ast-grep / tree-sitter）：
 
@@ -164,6 +178,24 @@ runtime:
 "立即停止条件"（`sample_upload_attempt` / `host_execution_attempt` / `execution_attempt_any` 等）
 不会把任务升级为全量停止；实际生效的是对**该次动作**的硬拒绝（拒命令 / 出网白名单 / 范围判定）。
 要不要让这类红线升级为全量停止是可配置的运营决策，接线前文档不把它当保证。
+
+## 3.7 bounty-recon 包额外说明
+
+**它是唯一会在 L3 放行"非授权目标"的白名单机制**。侦察要查 crt.sh / urlscan 这类公开情报源，
+这些主机不在 program scope 里，按 R1_scope 本应拒绝。判定为此加了一条显式规则：
+
+- `scope.egress_allowlist_extra` 里的主机 → `R8_intel_read`：只放行 GET/HEAD/OPTIONS；
+- 同一主机上的 POST/PUT/DELETE → `R8_egress_write` 直接拒（情报源不是测试目标，不得提交数据）；
+- 判定发生在 DNS 归属判定**之前**（`Scope.EgressIntelOnly`），白名单是策略里写死的、
+  可审计的，不依赖解析结果；
+- 请求仍计入 `total_requests_per_task` 预算，仍受响应体截断/敏感特征替换约束。
+
+放行只读方法是必要的：`crt.sh` 的查询就是 GET。但它也意味着**白名单里的主机不受范围判定保护**，
+所以这份清单必须由 operation 明确维护（模板里只有三个公开源，别把客户业务域名放进去）。
+
+其余差异都在 yaml 里：`engagement_requirements.test_accounts: false`（无账号即无写通道）、
+`budget.vuln_samples/send_actions/test_accounts: 0`、`scanner_burst_max: 0`、
+`tools.default_deny_binaries` 追加 `zmap`。
 
 ## 4. 新增一个域包
 

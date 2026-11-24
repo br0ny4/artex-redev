@@ -199,21 +199,29 @@
 
 ---
 
+## D12 · 在线侦察域单列，并给"情报源只读"一条显式判定（2026-11-24）
+
+- **决定**：新增 `bounty-recon` 域包（侦察/测绘/接口收割），与 `web-pentest` 共用执行层但重设预算形状：
+  `engagement_requirements.test_accounts: false`（无账号即无写通道）、`vuln_samples/send_actions/test_accounts: 0`、
+  `scanner_burst_max: 0`、读预算 4000 次/任务 3 rps。L3 增加 `R8_intel_read`：`egress_allowlist_extra`
+  里的主机只放行 GET/HEAD/OPTIONS（POST/写入 `R8_egress_write` 拒），判定在 DNS 归属判定之前
+  （`Scope.EgressIntelOnly`），仍计预算、仍受响应体截断与敏感特征替换。
+- **理由**：赏金侦察的请求绝大多数是"读公开情报源 + 读目标页面"，用测试域的写预算与 5 rps
+  既不必要又危险；而 crt.sh 这类主机不在 program scope 里，不放行等于侦察功能不可用——
+  操作员会去手动 `curl` 绕过平台，那才是真失控。
+- **代价**：白名单主机不再受范围判定保护（只受"只读方法"约束），因此该清单必须由操作员显式维护；
+  公开情报源上的 POST 类查询 API 用不了（只放只读，宁可功能少一点）。
+- **复盘条件**：若出现必须 POST 才能查的情报源，应先加"按主机声明允许的方法"字段，而不是整体放开读写。
+
+---
+
 # 下一步（自主执行顺序）
 
-1. **0day 准入三道门已落地**：反例验证（≥5 条不同路径）+ 撞车比对（≥3 次跨 2 类源）
-   + 触发验证（PoC，≥2 次连续复现，无 PoC 不算 finding），强制点在导出出口（409 + 逐条原因），
-   `force=1&reason=` 逐次放行并记日志（[08](08-0day-pipeline.md)）。门三已接**平台代执行重放**
-   （http PoC 由平台发包、机器判定、复现次数按实测抬高），`command`/`file`/`sample` 仍人工执行。
-2. **流水线阶段 2–3 已落地**：`add_candidate` 把可疑点登记成结构化工件（`vuln_candidates` + hops），
-   平台逐跳核对证据（在线域流量 id / 离线域授权目录内源码），核对结果算可达性；`report_finding`
-   带 `candidate_id` 转为结论。候选**不是第四道门**（不阻断导出），只回答"结论从哪来"。
-3. **离线/本地域只守宿主机边界（D11）**：宿主机破坏类命令与"执行授权目录内文件"始终拒，
-   `python -c`/样本内敏感字样/回环目标在离线域放行（`runtime.host_boundary`），
-   敏感判定只认路径形态。见 [07 §2.2](07-domain-packs.md)。
-4. **在线域扩展**：`bounty_recon`（侦察/资产梳理，继承 web-pentest 但更宽的只读面）与 CDP 浏览器分析域。
-5. **预算余量进仪表盘**：挂起数/拦截数/当前域包已上首页；预算余量与域包级指标（情报查询余量）仍缺。
+1. **CDP 浏览器分析域**：`chrome-devtools-mcp` + `playwright-mcp` 组合覆盖登录态、前端 API 挖掘、
+   JS 去混淆；WebSocket 帧捕获没有现成工具，需要小 CDP shim（[02 §3](02-tooling-survey.md)）。
+   判定面随之要回答"浏览器动作是否越过作业边界"（点击/提交等同于写操作），不能只靠 MCP 默认值。
+2. **预算余量进仪表盘**：挂起数/拦截数/当前域包已上首页；预算余量（请求/样本/PII）与域包级指标仍缺。
 3. **合规矩阵端到端**：把 04 §8 的用例扩成端到端（起代理 → 发请求 → 断言 403/截断/挂起）。
 4. **L2 之外**：非 compose 部署的 netns 脚本化（`deploy/egress-lockdown/README.md` 已给模板）。
-5. **发布**：v0.2.0 / v0.3.0 均已完成（tag → release run → 5 平台 zip + SHA256SUMS + GHCR 多架构镜像，
-   v0.2.0 实测 `docker pull` 通过且二进制可启动）；下一个版本带 malware-triage 与 L3 端到端用例。
+5. **发布**：v0.3.0 已发布（5 平台 zip + SHA256SUMS + GHCR 多架构，实测 `docker pull` 可拉取）；
+   下一个版本带上 `bounty-recon`、候选工件与 CDP（若完成）。

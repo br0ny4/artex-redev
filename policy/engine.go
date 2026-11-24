@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 	"sync"
 	"time"
@@ -246,6 +247,27 @@ func (e *Engine) decideRequest(ctx context.Context, task string, r Request) Deci
 			Reason: "禁止使用测试获取的凭据发起任何登录/身份验证请求（规范红线 10、5.5）"}
 	}
 
+	// 2.5 出网白名单（非测试目标）：在线侦察需要查 crt.sh / urlscan 这类公开情报源，
+	// 它们不在授权目标清单里，但策略已把它们写进 egress_allowlist_extra。
+	// 只放行只读方法，且不按"目标"记账之外的语义（写动作直接拒）。
+	if e.scope.EgressIntelOnly(r.Host) {
+		switch strings.ToUpper(r.Method) {
+		case http.MethodGet, http.MethodHead, http.MethodOptions:
+			bk := e.taskKey(task, normalizeHost(r.Host))
+			if ok, used, lim := e.budget.Reserve(bk, "total_requests_per_task", 1); !ok {
+				return e.raiseHoldDecision("BUDGET_EXHAUSTED",
+					fmt.Sprintf("任务请求总量已达上限 %.0f（已用 %.0f），熔断（规范第三章 1、5.3）", lim, used),
+					"预算已耗尽。请确认是否放宽本次 engagement 的请求总量上限，或结束本轮测试。", "")
+			}
+			return Decision{Action: ActionAllow, Rule: "R8_intel_read", Class: ClassF,
+				Matched: ClassVerdict{Class: ClassF, Rule: "egress_allowlist_extra"},
+				Reason:  "公开情报源只读查询（egress 白名单）"}
+		default:
+			return Decision{Action: ActionDeny, Rule: "R8_egress_write", Class: ClassUnknown,
+				Reason: "出网白名单主机只能只读访问（" + strings.ToUpper(r.Method) + " 被拒）：情报源不是测试目标，不得向其写入或提交数据"}
+		}
+	}
+
 	// 3. 范围：DNS 解析后再判（内网/元数据/第三方托管）
 	v, reason := e.scope.ResolveAndCheck(ctx, r.Host)
 	switch v {
@@ -295,9 +317,10 @@ func (e *Engine) decideRequest(ctx context.Context, task string, r Request) Deci
 }
 
 // CheckCommand 是命令出口（L1）的判定入口。返回 deny 时调用方应阻断工具调用。
-// 注意：本地沙箱里的破坏性命令不在这里拦（那是操作者自己的机器，由上游 intercept
-// 规则处理）；这里拦的是"目标侧 RCE 只读"、"扫描器未审批"、"内联解释器"、
-// "读敏感文件" 与 "命令里的目标越界"。
+// 注意：命令出口同时承担两类约束——① 宿主机安全（见 policy/hostguard.go：
+// 删根/写块设备/关机/执行授权目录内文件，始终拒）；② 作业边界（目标侧 RCE 只读、
+// 扫描器未审批、内联解释器、读敏感文件、命令里的目标越界）。离线域只保留 ①，
+// 并按 runtime.host_boundary 放宽分析动作。
 func (e *Engine) CheckCommand(task, cmd string, opt CommandOptions) Decision {
 	d := e.checkCommand(task, cmd, opt)
 	if d.Action == ActionDeny {

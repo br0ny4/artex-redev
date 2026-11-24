@@ -72,9 +72,24 @@ FLASH 通报，全球金融/政府/科技/国防等行业受影响；公网上�
 [`docs/redev/10-positioning.md`](docs/redev/10-positioning.md)。该文档里的代码坐标、接口与
 测试锚点由 `internal/docscheck` 在 CI 里校验——改代码不改文档会红，避免"定位"变成过时叙事。
 
-## 计划与进展
+## 进展与计划
 
+> 本节**每次提交都更新**：记录"现在到哪、下一步做什么"。最近更新：2026-11-24（`bounty-recon` 在线侦察域包）。
 > 状态：✅ 已完成 · 🚧 进行中 · 📋 计划中
+
+### 当前状态
+
+- **版本线**：Fork-0.3.0 已发布（5 平台二进制 + GHCR 多架构镜像）；`main` 持续迭代，发布按需打 tag。
+- **域包（5 个）**：`web-pentest`（在线测试）、`bounty-recon`（在线侦察，只看不动）、
+  `binary-re`（离线逆向）、`source-audit`（源码审计）、`malware-triage`（样本分诊）。
+- **执行层**：L1 命令出口（含宿主机边界）、L2 出网收口、L3 请求/响应判定、预算与 Stop-All、
+  哈希链判定审计；未配置 engagement 时保持上游行为。
+- **证据链**：三道准入门（PoC 可复现 ≥2 次 / 反例 ≥5 条 / 跨源撞车 ≥3 次且复核留痕）；
+  候选与逐跳可达性工件（证据由平台核对，不采信自称）。
+- **前端**：`/system/policy` 规范执行操作台、仪表盘停止横幅与拦截统计、漏洞详情「准入」页、
+  任务详情「候选」页。
+
+### 里程碑
 
 | 阶段 | 内容 | 状态 |
 |---|---|---|
@@ -83,10 +98,18 @@ FLASH 通报，全球金融/政府/科技/国防等行业受影响；公网上�
 | P1.5 | **规范执行层**：L1 命令/工具、L3 请求与响应、L2 出网强制、判定审计链 | ✅ |
 | P1.6 | hold 生命周期（全量停止 → 操作员答复 → 恢复 → 任务暂停/续跑）、操作台 | ✅ |
 | P1.7 | `/api/auth/init` 一次性 setup token + 前端配合 | ✅ |
-| P2 | 离线域包：`binary_re`（radare2-mcp / Ghidra headless）✅、`source_audit`（Semgrep/Joern/ast-grep）✅、`malware_triage`（capa/YARA/FLOSS）✅ | 🚧 在线域 `bounty_recon`、CDP 浏览器分析 |
-| P2.5 | 0day 流水线：攻击面提取 → 候选 → 可达性 → 触发验证 → **三道准入门**（PoC 可复现 + ≥5 条反例 + ≥3 次跨源撞车比对） | 🚧 准入强制已落地（[08](docs/redev/08-0day-pipeline.md)） |
-| P3 | 在线域包：`web_pentest`（继承 ARTEX）✅ + `bounty_recon` + CDP 浏览器分析 | 🚧 |
+| P2 | 离线域包：`binary_re`、`source_audit`、`malware_triage`；离线域只守宿主机边界 | ✅ |
+| P2.5 | 0day 流水线：候选 → 可达性 → 触发验证 → **三道准入门**（PoC 可复现 + ≥5 条反例 + ≥3 次跨源撞车比对） | ✅ 门与候选均落地（[08](docs/redev/08-0day-pipeline.md)） |
+| P3 | 在线域包：`web_pentest` ✅、`bounty_recon`（侦察，只看不动）✅、CDP 浏览器分析 | 🚧 CDP 未开始 |
 | P4 | 蓝队域包（检测工程 + agentic 攻击者检测规则）、多域报告、测评台（XBOW 104） | 📋 |
+
+### 下一步（按优先级）
+
+1. **CDP 浏览器分析**：`chrome-devtools-mcp` + `playwright-mcp` 组合，覆盖登录态、前端 API
+   挖掘、JS 去混淆；WebSocket 帧捕获缺工具，需要小 CDP shim。
+2. **预算余量进仪表盘**：值班要能一眼看出"这个任务还剩多少次请求"。
+3. **合规矩阵端到端**：越界/停止/清理/报告脱敏的完整链路用例。
+4. **L2 netns 自动化**：把 `deploy/egress-lockdown` 从"建议"变成 compose 默认。
 
 已落地的实现与"为什么这么定"记录在 [`docs/redev/05-decisions.md`](docs/redev/05-decisions.md)；
 设计细节见 [`docs/redev/04-policy-engine.md`](docs/redev/04-policy-engine.md)。
@@ -247,6 +270,25 @@ export ARTEX_ENGAGEMENT_FILE=./policy/malware-triage/deployment-context.yaml
   `wine`/`qemu`/`gdb`/`strace` 默认禁用。
 - 预算更紧：情报查询 100 次/任务（批量分诊时每个样本都要省着查）。
 
+### 3.9 在线侦察：赏金项目只看不动（bounty-recon 域包）
+
+赏金/众测的日常是"先测绘、后打点"：子域、JS、接口、变化监控。侦察域把这段工作从
+`web-pentest` 里分出来，用更紧的读写比与更低的速率，避免"探一探"变成扫描。
+
+```bash
+cp policy/bounty-recon/deployment-context.example.yaml policy/bounty-recon/deployment-context.yaml
+# 填 program scope（domains 支持 *.example.com 通配）、授权窗口、报告通道
+export ARTEX_ENGAGEMENT_FILE=./policy/bounty-recon/deployment-context.yaml
+./artex                                # 启动日志会打印 pack=bounty-recon
+```
+
+- **只看不动**：不申请测试账号，C/D/E 类（写）动作在语义层没有合法通道，直接拒；
+  预算里 `vuln_samples`、`send_actions` 都是 0。
+- **公开情报源只读**：`crt.sh` / `urlscan.io` / `otx.alienvault.com` 在 egress 白名单里，
+  只放行 GET/HEAD/OPTIONS（判定规则 `R8_intel_read`）；向其 POST/写入直接拒（`R8_egress_write`）。
+- **更慢的读**：默认 4000 次/任务、3 rps、并发 2；扫描器（nuclei/nmap/masscan/zmap…）默认禁用。
+- **通配授权**：`*.example.com` 按 scope 规则匹配，归属不明仍按范围外、必要时全量停止。
+
 ### 4. 锁定出网（L2，强烈建议）
 
 只靠代理挡不住 `nmap`/裸 TCP。把容器出口收口到唯一代理：
@@ -294,6 +336,7 @@ skills/      内置 skill
 - 分支：`main` 保持可构建、可测试；功能在 `feat/*` 分支开发后合入。
 - 提交规范：`type(scope): summary`（feat/fix/refactor/docs/test/chore/security）。
 - 每个安全相关改动**必须带回归测试**；策略层改动还要补合规矩阵用例。
+- **每次提交都要更新 README「进展与计划」**（当前状态 / 里程碑 / 下一步），保证文档不是过时叙事。
 - 提交前跑：`go build ./... && go vet ./... && go test ./...`（需要 PostgreSQL；CI 的串行策略与
   已知 flake 清单见 [`docs/redev/06-ci.md`](docs/redev/06-ci.md)）。
 - 安全问题请走私密渠道（见 [`SECURITY.md`](SECURITY.md)），不要公开提 issue。

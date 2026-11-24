@@ -14,7 +14,7 @@ import (
 func TestAvailablePacks(t *testing.T) {
 	got := AvailablePacks()
 	joined := strings.Join(got, ",")
-	for _, want := range []string{"web-pentest", "binary-re", "source-audit", "malware-triage"} {
+	for _, want := range []string{"web-pentest", "binary-re", "source-audit", "malware-triage", "bounty-recon"} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("域包列表缺少 %s：%v", want, got)
 		}
@@ -218,5 +218,98 @@ func TestEngineDefaultsToRequiringCapture(t *testing.T) {
 	var nilEng *Engine
 	if nilEng.RequiresTrafficCapture() {
 		t.Fatal("未启用引擎时不应要求录制代理")
+	}
+}
+
+// 在线侦察域与在线测试域共用执行层，但"只看不动"要能在配置里看出来：
+// 无测试账号、禁扫描器、情报源只读出网、预算向读倾斜。
+func TestPackConfigBountyRecon(t *testing.T) {
+	cfg, err := PackConfig("bounty-recon")
+	if err != nil {
+		t.Fatalf("加载 bounty-recon: %v", err)
+	}
+	if cfg.Spec.ID != "online-bounty-recon" {
+		t.Fatalf("spec.id=%q", cfg.Spec.ID)
+	}
+	if cfg.Requirements.TestAccounts {
+		t.Fatal("侦察域不应要求测试账号：它不做写操作")
+	}
+	if cfg.Runtime.RequiresTrafficCapture == nil {
+		t.Fatal("runtime.requires_traffic_capture 必须显式声明")
+	}
+	if !*cfg.Runtime.RequiresTrafficCapture {
+		t.Fatal("侦察域是在线域：必须有录制代理")
+	}
+	if cfg.Budget.VulnSamples != 0 || cfg.Budget.SendActions != 0 {
+		t.Fatalf("侦察域不该有漏洞验证/外发预算：samples=%v send=%v", cfg.Budget.VulnSamples, cfg.Budget.SendActions)
+	}
+	joined := strings.Join(cfg.Scope.EgressAllowlistExtra, ",")
+	if !strings.Contains(joined, "crt.sh") {
+		t.Fatalf("情报源白名单缺失：%v", cfg.Scope.EgressAllowlistExtra)
+	}
+	if len(cfg.Scope.OutOfBandAllowSuffixes) != 0 {
+		t.Fatalf("侦察不触发带外回调，带外域名应为空：%v", cfg.Scope.OutOfBandAllowSuffixes)
+	}
+	if strings.Contains(strings.Join(cfg.Tools.DefaultDenyBinaries, ","), "zmap") == false {
+		t.Fatalf("主动测绘工具应默认禁用：%v", cfg.Tools.DefaultDenyBinaries)
+	}
+}
+
+// 出网白名单主机是"非测试目标"：只放行只读方法，写动作直接拒。
+func TestBountyReconIntelEgressReadOnly(t *testing.T) {
+	cfg, err := PackConfig("bounty-recon")
+	if err != nil {
+		t.Fatal(err)
+	}
+	lx, err := PackLexicon("bounty-recon")
+	if err != nil {
+		t.Fatal(err)
+	}
+	eng := testEngagement(t)
+	eng.Accounts = nil // 侦察域没有测试账号
+	eng.Scope = EngScope{Domains: []string{"example.com"}}
+	e, err := New(cfg, lx, eng, NewNetResolver(time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d := e.DecideRequest(context.Background(), "t", req("GET", "crt.sh", "/?q=%25.example.com")); d.Action != ActionAllow {
+		t.Fatalf("情报源只读查询应放行，得到 %v(%s)", d.Action, d.Reason)
+	}
+	if d := e.DecideRequest(context.Background(), "t", req("POST", "crt.sh", "/api/submit")); d.Action != ActionDeny {
+		t.Fatalf("情报源不得写入，得到 %v(%s)", d.Action, d.Reason)
+	}
+	if d := e.DecideRequest(context.Background(), "t", req("GET", "evil.example.net", "/")); d.Action == ActionAllow {
+		t.Fatalf("非白名单外网主机不该放行，得到 %v(%s)", d.Action, d.Reason)
+	}
+}
+
+// 端到端：按侦察域模板装引擎——通配 scope、无测试账号也能装，pack 切换生效。
+func TestInstallBountyReconPack(t *testing.T) {
+	raw, err := os.ReadFile("bounty-recon/deployment-context.example.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	text := strings.ReplaceAll(string(raw), "2026-11-20T00:00:00+08:00",
+		now.Add(-24*time.Hour).Format("2006-01-02T15:04:05-07:00"))
+	text = strings.ReplaceAll(text, "2026-12-20T23:59:59+08:00",
+		now.Add(24*time.Hour).Format("2006-01-02T15:04:05-07:00"))
+	ctxPath := filepath.Join(t.TempDir(), "context.yaml")
+	if err := os.WriteFile(ctxPath, []byte(text), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	eng, err := InstallFromFile(ctxPath)
+	if err != nil {
+		t.Fatalf("按侦察域模板安装: %v", err)
+	}
+	defer Install(nil)
+	if eng.Pack() != "bounty-recon" {
+		t.Fatalf("pack=%q want bounty-recon", eng.Pack())
+	}
+	if !eng.RequiresTrafficCapture() {
+		t.Fatal("侦察域是在线域：L3 判定必须有代理")
+	}
+	if d := eng.DecideRequest(context.Background(), "t", req("GET", "crt.sh", "/")); d.Action != ActionAllow {
+		t.Fatalf("模板装好后情报源应可用，得到 %v(%s)", d.Action, d.Reason)
 	}
 }

@@ -254,6 +254,29 @@ func (s *Scope) ResolveAndCheck(ctx context.Context, host string) (ScopeVerdict,
 	return s.CheckResolved(h, cnames, ips)
 }
 
+// EgressIntelOnly 判断主机是否只属于"出网白名单/带外域名"这一类非测试目标
+// （crt.sh、urlscan、dnslog 等）。在线侦察域需要它：这些主机不在授权目标清单里，
+// 但查一次公开情报不该被当成越界；调用方只应对只读方法放行，且不做 DNS 归属判定
+// （白名单是策略里写死的、可审计的，不依赖解析结果）。
+func (s *Scope) EgressIntelOnly(host string) bool {
+	h := normalizeHost(host)
+	if v, _ := s.CheckHost(h); v == ScopeAllow {
+		return false
+	}
+	for _, suf := range s.cfg.OutOfBandAllowSuffixes {
+		suf = strings.ToLower(strings.TrimSpace(suf))
+		if suf != "" && (h == strings.TrimPrefix(suf, ".") || strings.HasSuffix(h, suf)) {
+			return true
+		}
+	}
+	for _, extra := range s.cfg.EgressAllowlistExtra {
+		if normalizeHost(extra) == h {
+			return true
+		}
+	}
+	return false
+}
+
 // EgressAllowed 判断"主机能否作为出网目的地"：只允许目标清单 + 带外域名 +
 // 报告通道（红线 8：业务数据/凭据/漏洞细节只能进报告通道）。
 func (s *Scope) EgressAllowed(host string) bool {

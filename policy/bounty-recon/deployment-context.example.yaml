@@ -1,0 +1,83 @@
+# =====================================================================
+# 部署上下文 · 在线侦察域（bounty_recon）
+#
+# 与 web_pentest 的区别：
+#   1) 授权范围来自赏金项目的 program scope（域名/通配子域），同样清单制；
+#   2) 不申请测试账号——本域只看不动，一旦出现写动作，语义层没有合法通道；
+#   3) 允许查询公开情报源（crt.sh / urlscan / OTX），出网仍经录制代理并记账；
+#   4) 预算向"读"倾斜（4000 次/任务），但速率更低，禁止扫描器突发。
+#
+# 平台启动时读取 engagement.pack 选择域策略；缺任一必填项时只允许被动分析。
+# =====================================================================
+
+engagement:
+  id: H1-2026-042
+  client: HackerOne 项目示例（公开赏金）
+  title: 赏金项目资产测绘与接口收割（只看不动）
+  # 赏金项目要把 program policy / scope 快照与授权确认一起留存，hash 进报告附录
+  authorization_doc: ./docs/authorization/H1-2026-042-scope.pdf
+  authorization_doc_sha256: "0000000000000000000000000000000000000000000000000000000000000000"
+  pack: bounty-recon
+  window:
+    starts_at: "2026-11-20T00:00:00+08:00"
+    ends_at: "2026-12-20T23:59:59+08:00"
+    timezone: Asia/Shanghai
+  contacts:
+    operator: 张三 <zhangsan@example.com>
+    client_poc: program-security <security@example.com>
+    report_channel: https://hackerone.com/reports/000000
+
+# --- 必填 1：授权范围（program scope 原样抄录；未列入即范围外）---
+scope:
+  domains:
+    - "*.example.com"        # 平台按通配处理（只匹配一层及以下子域，见 scope.go）
+    - example.com
+  ips: []
+  cidrs: []
+  apps: []
+  apis: []
+  notes: |
+    仅限 program policy 中列为 in-scope 的资产；out-of-scope 列表未单列在此的也按
+    范围外处理（赏金项目常有"关联公司/CDN 回源/第三方 SaaS"排除项）。
+    情报源（crt.sh/urlscan/OTX）只用于"查"，不是测试目标。
+  exclude:
+    - status.example.com     # program 明确排除的状态页
+    - "*.internal.example.com"
+  allowed_egress:
+    - https://hackerone.com/reports/000000
+
+# --- 必填 2：测试账号（侦察域为空；写了也不用）---
+# 没有测试账号 → C/D/E 类在语义层直接拒（"只看不动"的工程表达）。
+test_accounts: []
+
+# --- 必填 3：允许工具 ---
+# 注意：allowed_tools 目前是声明 + 审计依据，代码尚未按它做白名单（见 README 诚实清单）。
+allowed_tools:
+  always: [curl, httpie, jq, python3, node, rg]
+  per_use: []                # 侦察不需要扫描器；确需时让操作员在 guard 审批里放行
+  denied: [masscan, nmap, zmap, nuclei, ffuf, dirsearch, sqlmap, hydra, gobuster, feroxbuster, nikto]
+
+# --- 必填 4：报告出口 ---
+report:
+  channel: https://hackerone.com/reports/000000
+  format: markdown
+  attachments_allowed: [png, txt, json]
+
+# --- 必填 5：产物目录 ---
+artifacts:
+  dir: ./artifacts/H1-2026-042
+  max_total_mb: 300
+  purge_after_report: true
+  purge_grace_days: 7
+
+# --- 预算覆盖（只能比 policy.yaml 更严；放宽需书面记录）---
+budget_overrides:
+  total_requests_per_task: 2000
+  rate_rps_per_host: 2
+  pii_active_fetch: 0
+
+# --- 合规声明 ---
+compliance:
+  spec_version: "2.5"
+  handshake: "[RULES_LOADED v2.5]"
+  operator_acknowledged: true      # 已阅读 program policy 与平台规范
