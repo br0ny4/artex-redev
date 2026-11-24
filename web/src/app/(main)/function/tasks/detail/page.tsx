@@ -41,6 +41,7 @@ import type { LLMProfile, Task } from "@/lib/types";
 
 import { AssetsTab } from "./_tabs/assets-tab";
 import { BroadcastTab } from "./_tabs/broadcast-tab";
+import { CandidatesTab } from "./_tabs/candidates-tab";
 import { CoverageGraphTab } from "./_tabs/coverage-graph-tab";
 import { FindingsTab } from "./_tabs/findings-tab";
 import { GraphTab } from "./_tabs/graph-tab";
@@ -55,6 +56,7 @@ const TABS = [
   { value: "overview", label: "总览" },
   { value: "graph", label: "探索链路" },
   { value: "broadcast", label: "播报板" },
+  { value: "candidates", label: "候选" },
   { value: "findings", label: "发现" },
   { value: "retests", label: "复测" },
   { value: "assets", label: "测试资产" },
@@ -428,6 +430,9 @@ function TaskDetailInner() {
         </TabsContent>
         <TabsContent value="broadcast" className="mt-0">
           <BroadcastTab taskId={id} />
+        </TabsContent>
+        <TabsContent value="candidates" className="mt-0">
+          <CandidatesTab key={id} taskId={id} />
         </TabsContent>
         <TabsContent value="findings" className="mt-0">
           <FindingsTab taskId={id} />

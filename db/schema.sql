@@ -1500,3 +1500,39 @@ CREATE INDEX IF NOT EXISTS idx_finding_poc_replays_finding ON finding_poc_replay
 -- "这次到底复现没有"。手写的 expected 是给人看的，不能拿来判定。
 ALTER TABLE finding_pocs ADD COLUMN IF NOT EXISTS expect_status INT NOT NULL DEFAULT 0;
 ALTER TABLE finding_pocs ADD COLUMN IF NOT EXISTS expect_body_contains TEXT NOT NULL DEFAULT '';
+
+-- 0day 流水线阶段 2：候选（可疑点）。阶段 3 的可达性路径存在 vuln_candidate_hops。
+-- 与 findings 分开：候选是"还没证实的怀疑"，finding 是"已登记待准入的结论"；
+-- 候选转 finding 用 finding_id 关联（状态置 converted）。
+CREATE TABLE IF NOT EXISTS vuln_candidates (
+    id         BIGSERIAL PRIMARY KEY,
+    task_id    BIGINT REFERENCES tasks(id) ON DELETE SET NULL,
+    node_id    BIGINT REFERENCES exploration_nodes(id) ON DELETE SET NULL, -- 从哪个意图/事实推导出来
+    finding_id BIGINT REFERENCES findings(id) ON DELETE SET NULL,         -- 转成的 finding
+    title      TEXT NOT NULL DEFAULT '',
+    kind       TEXT NOT NULL DEFAULT 'other', -- sink|parse|logic|auth|config|other
+    location   TEXT NOT NULL DEFAULT '',      -- 在线域 host+路径/接口；离线域 path[:line]
+    entry      TEXT NOT NULL DEFAULT '',      -- 外部输入从哪进来
+    sink       TEXT NOT NULL DEFAULT '',      -- 危险操作是什么
+    rationale  TEXT NOT NULL DEFAULT '',
+    status     TEXT NOT NULL DEFAULT 'open',  -- open|converted|dismissed
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_vuln_candidates_task ON vuln_candidates(task_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_vuln_candidates_finding ON vuln_candidates(finding_id);
+
+-- 可达性路径的一跳。ref 指向可核对的证据：在线域真实流量 id、离线域授权目录内源码
+-- 位置、command 为人工核对。verified 由服务端核对后写入（agent 自填一律不算）。
+CREATE TABLE IF NOT EXISTS vuln_candidate_hops (
+    id              BIGSERIAL PRIMARY KEY,
+    candidate_id    BIGINT NOT NULL REFERENCES vuln_candidates(id) ON DELETE CASCADE,
+    ordinal         INT NOT NULL DEFAULT 0,
+    ref_kind        TEXT NOT NULL DEFAULT 'other', -- traffic|source|command|other
+    ref             TEXT NOT NULL DEFAULT '',
+    claim           TEXT NOT NULL DEFAULT '',
+    verified        BOOLEAN NOT NULL DEFAULT FALSE,
+    verified_detail TEXT NOT NULL DEFAULT '',
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_vuln_candidate_hops_candidate ON vuln_candidate_hops(candidate_id, ordinal, id);

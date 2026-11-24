@@ -53,8 +53,17 @@ func (s *Server) getFindingGate(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 500, err.Error())
 		return
 	}
+	candidates, err := s.m.pg.ListVulnCandidatesByFinding(r.Context(), id)
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	for _, c := range candidates {
+		s.verifyCandidateHops(r.Context(), c)
+	}
 	writeJSON(w, 200, map[string]any{
 		"finding_id":      id,
+		"candidates":      candidates,
 		"gate":            vulngate.Assess(a),
 		"counterexamples": a.Counterexamples,
 		"novelty_checks":  a.Novelty,

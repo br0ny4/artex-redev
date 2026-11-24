@@ -114,6 +114,7 @@ import type {
   TrafficResp,
   UpdateCheck,
   UsageStats,
+  VulnCandidate,
   WorkspaceFile,
   WorkspaceListing,
 } from "@/lib/types";
@@ -725,6 +726,25 @@ export const api = {
       gate: GateVerdict;
       requirements: FindingGateRequirements;
     }>(`/exploration/findings/${encodeURIComponent(id)}/gate/poc/replay`, {}),
+  // 0day 流水线阶段 2–3：候选可疑点（结论的起点）。服务端读取时会逐跳核对证据并重算可达性。
+  vulnCandidates: (task?: string, limit = 100) =>
+    get<{ candidates: VulnCandidate[] }>(
+      `/exploration/candidates?task=${encodeURIComponent(task ?? "")}&limit=${limit}`,
+    ).then((r) => arr(r.candidates)),
+  createVulnCandidate: (body: {
+    task_id: number;
+    title: string;
+    kind?: string;
+    location: string;
+    entry?: string;
+    sink?: string;
+    rationale?: string;
+    hops?: { ref_kind: string; ref: string; claim?: string }[];
+  }) => post<{ candidate: VulnCandidate }>("/exploration/candidates", body),
+  setVulnCandidateStatus: (id: number, status: string) =>
+    post<{ candidate: VulnCandidate }>(`/exploration/candidates/${id}/status`, { status }),
+  linkVulnCandidate: (id: number, findingId: number) =>
+    post<{ candidate: VulnCandidate }>(`/exploration/candidates/${id}/link`, { finding_id: findingId }),
   findingRetests: (id: string) =>
     get<{ retests: FindingRetest[] }>(`/exploration/findings/${encodeURIComponent(id)}/retests`).then((r) =>
       arr(r.retests),

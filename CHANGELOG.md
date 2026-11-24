@@ -37,6 +37,15 @@
   - 接口：`GET /api/exploration/findings/{id}/gate`、`POST …/gate/counterexamples`、
     `POST …/gate/novelty`、`PUT …/gate/poc`（均支持撤回删除）；判定逻辑在纯 Go 包 `vulngate/`，可单测。设计见
     [`docs/redev/08-0day-pipeline.md`](docs/redev/08-0day-pipeline.md)。
+- **0day 流水线阶段 2–3 结构化工件（候选 → 可达性 → 结论）**：新增 `vulnpipe` 包与
+  `vuln_candidates` / `vuln_candidate_hops` 表，agent 用 `add_candidate` 登记"值得验证的路径"
+  （位置、入口→sink 每跳证据），平台在每次读取时逐跳核对：在线域每跳必须是真实存在的流量 id，
+  离线域源码位置必须在 `scope.local_paths` 授权目录内且行号有效；核对结果算
+  `unknown/claimed/partial/verified` 可达性，agent 自述的"已验证"不作数。`report_finding` 新增
+  `candidate_id`，关联后候选转结论，准入页响应带出候选证据链。候选**不阻断导出**（三道门仍是唯一准入），
+  它回答的是"这条结论从哪来"。任务页新增「候选」Tab。接口：
+  `GET/POST /api/exploration/candidates`、`GET …/{id}`、`POST …/{id}/hops`、`DELETE …/{id}/hops/{hid}`、
+  `POST …/{id}/status`、`POST …/{id}/link`。
 - **漏洞详情新增「准入」页**：三道门的完成度、还差什么的逐条原因，以及 PoC / 反例 / 撞车检索的
   录入与撤回表单——操作员不用再靠 curl 登记；判定仍是服务端强制，前端只负责录入与展示。
 
@@ -60,6 +69,10 @@
   断言范围外目标返回 403 + `X-ArtEx-Policy`、阻断说明含"平台管控"、尝试进了流量索引。
   用不存在的 `.invalid` 域名做目标：若代理把请求转发出去过，会得到 502 而不是 403——
   单测只能证明"判定返回 deny"，这个用例证明"代理真的没发包"。
+- **候选与可达性核对**：流量跳引用真实 id 才算核对通过、编造 id 降为 partial 且说明原因；
+  离线域授权目录内源码通过、授权外文件/行号越界不通过；关联 finding 后候选 converted 且准入页带出；
+  缺 location / 非法状态 400（`vulnpipe/vulnpipe_test.go`、`db/vuln_candidates_test.go`、
+  `server/vuln_candidates_test.go`）。
 - **录制锁**：启用规范执行层后 `SetTrafficEnabled(false)` 必须报错且录制保持开启，不能再出现"报错但已关掉"
   （`server/policy_capture_lock_test.go`，此前只有实现没有回归锚点）。
 

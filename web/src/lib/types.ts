@@ -1742,6 +1742,40 @@ export interface GateNoveltyCheck {
   review_note?: string;
 }
 
+// 0day 流水线阶段 2 的候选可疑点：结论的起点，不是漏洞（不参与三道门阻断）。
+// 每跳证据由平台核对（traffic id 真实存在 / 源码在授权目录清单内），agent 自述不算。
+export interface VulnCandidateHop {
+  id?: number;
+  ordinal: number;
+  ref_kind: "traffic" | "source" | "command" | "other" | string;
+  ref: string;
+  claim: string;
+  verified: boolean;
+  verified_detail?: string;
+}
+
+export type VulnReachability = "unknown" | "claimed" | "partial" | "verified";
+
+export interface VulnCandidate {
+  id: number;
+  task_id: number;
+  node_id?: number;
+  finding_id?: number;
+  title: string;
+  kind: string;
+  location: string;
+  entry?: string;
+  sink?: string;
+  rationale?: string;
+  status: "open" | "converted" | "dismissed" | string;
+  reachability: VulnReachability;
+  verified_hops: number;
+  unverified_hops: number;
+  hops?: VulnCandidateHop[] | null;
+  created_at?: string;
+  updated_at?: string;
+}
+
 export interface GatePoc {
   kind: string;
   input: string;

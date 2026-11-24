@@ -21,13 +21,37 @@
 | 阶段 | 产出 | 平台能力 | 状态 |
 |---|---|---|---|
 | 1. 攻击面提取 | 入口清单（路由/参数/文件格式/二进制入口） | `source-audit` 域包（semgrep/joern/ast-grep）、`binary-re`（radare2/Ghidra） | ✅ 域包就绪 |
-| 2. 候选生成 | 可疑点（sink 未过滤、危险解析、逻辑缺陷） | agent + 域包工具 | 🚧 提示词/流程待固化 |
-| 3. 可达性确认 | 触发路径（从外部输入到 sink 的真实路径） | 流量代理（L3）+ 源码交叉 | 🚧 |
+| 2. 候选生成 | 可疑点（sink 未过滤、危险解析、逻辑缺陷） | `add_candidate` 工具 → `vuln_candidates` 表；`GET/POST /api/exploration/candidates` | ✅ 结构化工件 |
+| 3. 可达性确认 | 触发路径（从外部输入到 sink 的真实路径） | 平台逐跳核对：在线域 `traffic` id 必须真实存在、离线域 `source` 必须在 `scope.local_paths` 内且行号有效 | ✅ 平台核对（agent 自述不算） |
 | 4. 触发验证 | 可复现的 PoC（请求/命令/样本），无 PoC 不算 finding | guard 放行条件下的真实执行 + `PUT …/gate/poc` 落库 | ✅ 强制 |
 | **5. 门一：反例验证** | ≥5 条反例记录 | `POST /api/exploration/findings/{id}/gate/counterexamples` | ✅ 强制 |
 | **6. 门二：撞车比对** | ≥3 次跨源检索记录 | `POST /api/exploration/findings/{id}/gate/novelty` | ✅ 强制 |
 | **5b. 门三：触发验证** | 1 份 PoC（kind/input/observed/evidence + ≥2 次复现） | `PUT /api/exploration/findings/{id}/gate/poc`、`POST …/gate/poc/replay` | ✅ 强制 |
 | 7. 报告与提交 | 交付物 | 导出接口（门未过则 409） | ✅ 强制 |
+
+### 阶段 2–3：候选与可达性（不是第四道门）
+
+门回答"能不能交付"，阶段 2–3 回答"结论从哪来"。候选**不阻断导出**——它是证据链的起点，
+用来让报告里的每条结论都能回溯到"谁在什么位置发现了什么、这条路径核对过没有"。
+
+- 数据：`vuln_candidates`（title/kind/location/entry/sink/rationale/status/reachability）+
+  `vuln_candidate_hops`（ordinal/ref_kind/ref/claim/verified/verified_detail）。
+- 登记：agent 用 `add_candidate`（worker/planner/mainagent/auto/pentest 默认绑定），
+  或 `POST /api/exploration/candidates`。`title`、`location` 必填；`entry`/`sink` 允许空，
+  那正是阶段 3 要补的。
+- 核对：每次**读取**候选（列表/详情/准入页）都会重做一遍逐跳核对，因为流量索引会被清理、
+  源码文件会被移走。核对结果写回 `verified`/`verified_detail`，再由 `vulnpipe.Reachability`
+  算出 `unknown / claimed / partial / verified`。
+  - `traffic` 跳：`traffic.Get(ref)` 必须命中，detail 带 `<id> · <请求行>`；未开启录制或
+    id 不存在都判未通过（"编的 id 或已被清理"）。
+  - `source` 跳：`ref` 形如 `path/to/file.go:123`。相对路径逐个拼到
+    `policy.Default().Engagement().Scope.LocalPaths` 的授权根下；不在任何根内 → "不在授权目录"；
+    文件不存在/行号越界（上限 20 万行）→ 明确报错。没有目录清单授权时一律"无法核对"。
+  - `command`/`other` 跳：平台不代跑，标"需人工复核"。
+- 转结论：`report_finding` 新增 `candidate_id`（或 `POST …/candidates/{id}/link`），
+  关联后候选 `status=converted`，`get gate` 响应带出 `candidates` 列表。
+- 为什么不做第四道门：离线域没有流量、有些结论只有人工命令证据；把候选设成阻断会让
+  流水线退化成"必须先造一条路径才能报漏洞"。三道门（反例/撞车/PoC）仍是唯一准入标准。
 
 ## 3. 为什么三道门必须在工程层
 
@@ -141,6 +165,20 @@
 ## 4. 接口
 
 ```bash
+# 登记一个候选可疑点（在线域用真实 traffic id 做跳，离线域用源码位置）
+curl -X POST -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"task_id":7,"title":"订单查询 id 直接拼 SQL","kind":"sink","location":"https://shop.example.com/api/order/detail","rationale":"id 未做参数化","hops":[{"ref_kind":"traffic","ref":"a1b2c3","claim":"入口请求把 id 原样传入"}]}' \
+  http://127.0.0.1:8787/api/exploration/candidates
+
+# 候选列表（每次读取都会重做逐跳核对，reachability 是平台算的）
+curl -H "Authorization: Bearer $TOKEN" \
+  "http://127.0.0.1:8787/api/exploration/candidates?task=7&limit=50"
+
+# 把候选转成结论（也可在 report_finding 里带 candidate_id）
+curl -X POST -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"finding_id":12}' \
+  http://127.0.0.1:8787/api/exploration/candidates/3/link
+
 # 查看当前门状态与还差什么
 curl -H "Authorization: Bearer $TOKEN" \
   http://127.0.0.1:8787/api/exploration/findings/12/gate
@@ -206,7 +244,10 @@ HTTP 409
    GitHub issue、厂商公告、搜索引擎仍需人工登记（这些源要么要 token，要么防抓取）。
    覆盖面上限取决于接入的源；下一步是接可配置的检索 MCP，并让"是否同一个漏洞"的
    复核结果也留痕（谁复核的、依据哪条命中）。
-3. **重放只覆盖 `kind=http`**：平台已能代跑 HTTP PoC 并逐次判定、回填真实流量，但
+3. **候选的可达性是"核对证据"，不是"证明可达"**：平台只能确认跳里引用的流量/源码确实存在，
+   不能证明这些跳串起来真的构成一条从外部输入到 sink 的完整路径——那要靠阶段 4 的 PoC
+   去证明。所以 `verified` 只表示"引用的东西是真的"，不等于"漏洞成立"。
+4. **重放只覆盖 `kind=http`**：平台已能代跑 HTTP PoC 并逐次判定、回填真实流量，但
    `command`/`file`/`sample` 类 PoC 仍在宿主机由人/agent 执行（平台刻意不代跑）。
    代价是这几类"真的跑过吗"仍靠自觉；下一步是把沙箱执行结果也纳入机器证据
    （沙箱回执 + 样本哈希），或按域包声明哪些 kind 可以阻断。

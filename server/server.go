@@ -798,6 +798,15 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/exploration/findings/{id}/retests", s.listFindingRetests)
 	mux.HandleFunc("GET /api/exploration/findings/retests/active", s.listActiveFindingRetests)
 	mux.HandleFunc("POST /api/exploration/findings/{id}/retests", s.startFindingRetest)
+	// 0day 流水线阶段 2–3：候选（可疑点）与可达性路径。路径的每一跳由平台核对证据，
+	// 不阻断导出，但准入页会展示"结论从哪来"。
+	mux.HandleFunc("GET /api/exploration/candidates", s.listVulnCandidates)
+	mux.HandleFunc("POST /api/exploration/candidates", s.createVulnCandidate)
+	mux.HandleFunc("GET /api/exploration/candidates/{id}", s.getVulnCandidate)
+	mux.HandleFunc("POST /api/exploration/candidates/{id}/hops", s.addVulnCandidateHop)
+	mux.HandleFunc("DELETE /api/exploration/candidates/{id}/hops/{hid}", s.deleteVulnCandidateHop)
+	mux.HandleFunc("POST /api/exploration/candidates/{id}/status", s.setVulnCandidateStatus)
+	mux.HandleFunc("POST /api/exploration/candidates/{id}/link", s.linkVulnCandidateFinding)
 	mux.HandleFunc("PATCH /api/exploration/findings/{id}", s.patchFinding)
 	mux.HandleFunc("DELETE /api/exploration/findings/{id}", s.deleteFinding)
 	mux.HandleFunc("GET /api/exploration/intents", s.intents)

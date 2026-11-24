@@ -163,6 +163,10 @@
 | 门二复核留痕：平台代检命中必须人看过才计数（复核人/时间/依据落库，未复核阻断导出，撞车须写依据） | ✅ | `vulngate/gate.go`、`server/finding_gate.go`、`db/finding_gate.go` |
 | 门三机器证据：平台代执行重放（经录制代理发包、机器判定、复现次数按实测抬高、回填真实流量 id；仅 http） | ✅ | `vulngate/replay.go`、`server/finding_poc_replay.go` |
 | 离线域免录制代理启动：域包 `runtime.requires_traffic_capture`（在线域仍 fail-closed，离线域录制可关） | ✅ | `policy/engine.go`、`server/manager.go`、`server/policy_offline_pack_test.go` |
+| 阶段 2 候选产物：`add_candidate` 工具 + `vuln_candidates`/`vuln_candidate_hops` 表 + 候选 API | ✅ | `vulnpipe/`、`db/vuln_candidates.go`、`server/vuln_candidates.go` |
+| 阶段 3 可达性核对：traffic id 真实存在、源码在 `scope.local_paths` 内且行号有效（读取时重做） | ✅ | `server/vuln_candidates.go` + 测试 |
+| 候选转结论：`report_finding` 带 `candidate_id` → 候选 converted，准入页带出证据链 | ✅ | `agent/tools.go`、`server/finding_gate.go` |
+| 前端任务页「候选」Tab：可达性/逐跳核对详情/转结论/忽略 | ✅ | `web/.../tasks/detail/_tabs/candidates-tab.tsx` |
 | **未做**：合规矩阵其余端到端（响应截断/预算/挂起全链路） | ⬜ | 下一个切片 |
 
 ---
@@ -185,7 +189,10 @@
    + 触发验证（PoC，≥2 次连续复现，无 PoC 不算 finding），强制点在导出出口（409 + 逐条原因），
    `force=1&reason=` 逐次放行并记日志（[08](08-0day-pipeline.md)）。门三已接**平台代执行重放**
    （http PoC 由平台发包、机器判定、复现次数按实测抬高），`command`/`file`/`sample` 仍人工执行。
-2. **在线域扩展**：`bounty_recon`（侦察/资产梳理，继承 web-pentest 但更宽的只读面）与 CDP 浏览器分析域。
+2. **流水线阶段 2–3 已落地**：`add_candidate` 把可疑点登记成结构化工件（`vuln_candidates` + hops），
+   平台逐跳核对证据（在线域流量 id / 离线域授权目录内源码），核对结果算可达性；`report_finding`
+   带 `candidate_id` 转为结论。候选**不是第四道门**（不阻断导出），只回答"结论从哪来"。
+3. **在线域扩展**：`bounty_recon`（侦察/资产梳理，继承 web-pentest 但更宽的只读面）与 CDP 浏览器分析域。
 2. **预算余量进仪表盘**：挂起数/拦截数/当前域包已上首页；预算余量与域包级指标（情报查询余量）仍缺。
 3. **合规矩阵端到端**：把 04 §8 的用例扩成端到端（起代理 → 发请求 → 断言 403/截断/挂起）。
 4. **L2 之外**：非 compose 部署的 netns 脚本化（`deploy/egress-lockdown/README.md` 已给模板）。

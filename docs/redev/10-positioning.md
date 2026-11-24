@@ -65,6 +65,8 @@ ARTEX 被大规模滥用（FBI FLASH 通报、1400+ 无鉴权控制台）恰好�
 | 门三：平台经录制代理重放 PoC、机器判定、按实测抬高复现次数 | `server/finding_poc_replay.go` | `server TestFindingPocReplayBackfillsMachineEvidence` |
 | 门二：平台代执行撞车检索（NVD / CISA KEV），查不动不算没撞车 | `novelty/novelty.go` | `novelty TestKEVSearchMatchesVersionedQuery` |
 | 门二复核留痕：平台代检命中必须人看过才计数（谁复核、何时、依据哪条命中） | `vulngate/gate.go` | `vulngate TestAssessBlocksUnreviewedPlatformProbe` |
+| 阶段 2–3：候选可疑点结构化登记，每条结论可回溯「入口→sink」路径 | `vulnpipe/vulnpipe.go` | `vulnpipe TestReachabilityStates` |
+| 可达性由平台核对：流量 id 必须真实存在、源码必须在授权目录清单内 | `server/vuln_candidates.go` | `server TestVulnCandidateSourceHopScope` |
 
 ### 4.3 对外可验能力（接口必须真实存在于 `server/`）
 
@@ -73,6 +75,7 @@ ARTEX 被大规模滥用（FBI FLASH 通报、1400+ 无鉴权控制台）恰好�
 - 三道门：`/api/exploration/findings/{id}/gate`
 - 门二机器证据：`/api/exploration/findings/{id}/gate/novelty/probe`
 - 门三机器证据：`/api/exploration/findings/{id}/gate/poc/replay`
+- 阶段 2–3 候选：`/api/exploration/candidates`、`/api/exploration/candidates/{id}`、`…/{id}/hops`、`…/{id}/status`、`…/{id}/link`
 
 ## 5. 风险登记（诚实记录，不美化）
 

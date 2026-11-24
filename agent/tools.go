@@ -10,6 +10,7 @@ import (
 	acperm "github.com/Autumn-27/norma/permission"
 	actool "github.com/Autumn-27/norma/tool"
 	"github.com/br0ny4/artex-redev/db"
+	"github.com/br0ny4/artex-redev/vulnpipe"
 )
 
 // compactIntents distills intents to {id, summary, state, asset_ids, parents,
@@ -1222,6 +1223,7 @@ func (t *ToolSet) addFinding() actool.CoreTool {
 		"intent_id": idp("当前任务的意图 id"), "asset_ids": map[string]any{"type": "array", "items": map[string]any{"type": "integer"}, "description": "受影响资产 id"},
 		"evidence":         str("证据/PoC 文本"),
 		"evidence_hint_id": idp("可选：本任务中对应此漏洞的提示节点 ID，自动携带其结构化 traffic_refs；不能引用继承提示或其他漏洞的提示"),
+		"candidate_id":     idp("可选：本漏洞对应的候选 id（add_candidate 返回）。带上它，平台会把候选转为结论，报告里就能追溯这条结论的入口→sink 路径"),
 		"traffic_refs": map[string]any{"type": "array", "description": "可选；HTTP/HTTPS 漏洞先检索并逐条核实请求/响应确实支持漏洞结论，再按复现顺序填写真实 ID。TCP 等非 HTTP 漏洞、未采集或找不到确切记录时省略或传 []，不阻止上报；可在 evidence 说明原因并提供其他可验证证据。不要猜测 ID、按域名/时间推定关联或仅为补包重复探测。用途 baseline 正常对照 / proof 漏洞证明 / verification 补充验证 / supporting 辅助证据。",
 			"items": obj(map[string]any{"traffic_id": str("traffic_search 返回的真实流量 ID"), "role": map[string]any{"type": "string", "enum": []string{"baseline", "proof", "verification", "supporting"}}, "note": str("该流量如何支持漏洞结论")}, "traffic_id")},
 	}, "vulnclass", "severity", "summary"), func(ctx context.Context, in json.RawMessage) (actool.Result, error) {
@@ -1231,6 +1233,7 @@ func (t *ToolSet) addFinding() actool.CoreTool {
 			AssetIDs                                     []json.RawMessage `json:"asset_ids"`
 			TrafficRefs                                  []db.TrafficRef   `json:"traffic_refs"`
 			EvidenceHintID                               json.RawMessage   `json:"evidence_hint_id"`
+			CandidateID                                  json.RawMessage   `json:"candidate_id"`
 		}
 		if err := json.Unmarshal(in, &a); err != nil {
 			return actool.Errorf(err.Error()), nil
@@ -1285,6 +1288,12 @@ func (t *ToolSet) addFinding() actool.CoreTool {
 			EvidenceStatus string `json:"evidence_status"`
 			EvidenceNote   string `json:"evidence_note,omitempty"`
 		}{RecordedFinding: recorded, EvidenceStatus: "bound"}
+		if cid := pid(a.CandidateID); cid > 0 && t.ts != nil {
+			// 候选转结论不是上报的前提：失败只提示，绝不因此丢弃已经确认的漏洞。
+			if err := t.ts.LinkCandidateFinding(ctx, cid, recorded.FindingID); err != nil {
+				result.EvidenceNote = strings.TrimSpace(result.EvidenceNote + " 候选关联失败：" + err.Error())
+			}
+		}
 		if len(recorded.Traffic.Bindings) == 0 {
 			result.EvidenceStatus = "not_bound"
 			result.EvidenceNote = "漏洞已保存，未绑定流量。TCP/无包情形可正常继续；若已有核实的 HTTP 流量，请用可用的 bind_finding_traffic 或漏洞页面补绑，再完成证据交接。不要重复创建漏洞。"
@@ -1295,6 +1304,50 @@ func (t *ToolSet) addFinding() actool.CoreTool {
 		raw, _ := json.Marshal(result)
 		return actool.Text(fmt.Sprintf("finding recorded: %d\n%s", recorded.NodeID, raw)), nil
 	})
+}
+
+// addCandidate 登记 0day 流水线阶段 2 的「候选可疑点」：它是"结论从哪来"的起点，
+// 不是漏洞、也不过准入三道门（那三道门仍在 vulngate）。每跳证据由平台在读取时核对，
+// agent 自述的"已验证"不算数。
+func (t *ToolSet) addCandidate() actool.CoreTool {
+	return t.writeExpTool("add_candidate", "登记一个【候选可疑点】（0day 流水线阶段 2：攻击面 → 候选）。候选 ≠ 漏洞，只表示\"这里有值得验证的路径\"；验证成功后用 report_finding 带上 candidate_id，平台会把候选转为结论。\n"+
+		"⚠️每跳证据要能指向真实东西，平台会核对：在线域用 traffic id（ref_kind=traffic，必须是本任务真实抓到的流量）；离线域用源码位置（ref_kind=source，形如 path/to/file.go:123，且必须在授权目录清单 scope.local_paths 内）。核对不过的跳会被标成未验证——不要自己宣称路径已核实。",
+		obj(map[string]any{
+			"title":     str("一句话说清可疑点（≤200 字，写\"哪里有什么可疑\"，不写结论）"),
+			"kind":      str("sink 危险操作被拼接/直通 | parse 解析器/反序列化 | logic 业务逻辑/越权 | auth 认证授权 | config 配置/部署 | other"),
+			"location":  str("位置：在线域写 host + 路径/接口（如 https://a.example.com/api/order/detail）；离线域写源码位置 path[:line]"),
+			"entry":     str("外部输入从哪进来（可选，阶段 3 触发验证时补全）"),
+			"sink":      str("危险操作是什么（可选，如 拼接进 SQL / 直接反序列化 / os.system）"),
+			"rationale": str("为什么可疑：缺了哪一层过滤/类型/边界/权限校验"),
+			"hops": map[string]any{"type": "array", "description": "入口→sink 的路径（可选但强烈建议）：每跳一条证据，平台逐跳核对。", "items": obj(map[string]any{
+				"ref_kind": str("traffic（在线域真实流量 id）|source（离线域源码位置 path[:line]）|command（命令输出）|other"),
+				"ref":      str("证据引用：traffic id / 源码位置 / 命令本身"),
+				"claim":    str("这一跳证明路径的哪一段（如\"入口请求把 id 原样传入\"）"),
+			}, "ref_kind", "ref")},
+		}, "title", "location"), func(ctx context.Context, in json.RawMessage) (actool.Result, error) {
+			var a struct {
+				Title, Kind, Location, Entry, Sink, Rationale string
+				Hops                                          []struct{ RefKind, Ref, Claim string } `json:"hops"`
+			}
+			if err := json.Unmarshal(in, &a); err != nil {
+				return actool.Errorf(err.Error()), nil
+			}
+			ci := vulnpipe.CandidateInput{Title: a.Title, Kind: a.Kind, Location: a.Location, Entry: a.Entry, Sink: a.Sink, Rationale: a.Rationale}
+			for _, h := range a.Hops {
+				ci.Hops = append(ci.Hops, vulnpipe.HopInput{RefKind: h.RefKind, Ref: h.Ref, Claim: h.Claim})
+			}
+			if err := vulnpipe.ValidateCandidate(ci); err != nil {
+				return actool.Errorf(err.Error()), nil
+			}
+			id, err := t.ts.RecordCandidate(ctx, t.taskID, t.ownerNode, ci)
+			if err != nil {
+				return actool.Errorf(err.Error()), nil
+			}
+			return jsonResult(map[string]any{
+				"candidate_id": id,
+				"note":         "候选已登记。可达性由平台核对每跳证据（流量 id 是否真实存在、源码是否在授权目录清单内）后计算，你填的\"已验证\"不作数；验证成功后 report_finding 带 candidate_id 即可把候选转为结论。",
+			})
+		})
 }
 
 // recordFact writes a general exploration RESULT/conclusion (not a vuln, not a
@@ -2039,6 +2092,8 @@ func (t *ToolSet) PlannerTools() []actool.CoreTool {
 		t.killWorkTool(), t.steerWorkTool(),
 		// report_finding：规划态势研判时若自身已确证漏洞，可直接登记（与 worker 同工具）。
 		t.addFinding(),
+		// add_candidate：规划时把"从资产/指纹/代码里看到的可疑路径"登记成候选，交 worker 触发验证。
+		t.addCandidate(),
 		// list_companies：查看企业列表 + scope + 资产数（拿 company_id / 理解归属范围）。
 		t.listCompanies(),
 		// list_assets：规划时按 DSL 检索全资产库（配合 list_untested_assets 的"范围内未测"视角，

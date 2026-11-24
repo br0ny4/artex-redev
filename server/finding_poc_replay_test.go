@@ -53,6 +53,11 @@ type gateView struct {
 		Matched    bool   `json:"matched"`
 		Detail     string `json:"detail"`
 	} `json:"poc_replays"`
+	Candidates []struct {
+		ID           int64  `json:"id"`
+		Title        string `json:"title"`
+		Reachability string `json:"reachability"`
+	} `json:"candidates"`
 	Novelty []struct {
 		ID          int64    `json:"id"`
 		Query       string   `json:"query"`

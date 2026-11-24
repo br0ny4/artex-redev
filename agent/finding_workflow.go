@@ -70,6 +70,10 @@ func findingWorkflowTools(agentKey string, tools []actool.CoreTool) ([]actool.Co
 			"因此上报时请在 evidence 里同时写清：PoC 的触发输入与实际结果、连续复现次数；每条反例的 claim（排除哪条误报路径）、method（怎么验的）、expected（正常应观察到什么）、observed（实际观察到什么）；以及撞车检索用的关键词、来源类别、是否命中同类漏洞。" +
 			"这些记录由操作员在准入接口登记；未过门的 finding 导出报告会被 409 拦下。不要声称做过未真正执行的验证。"
 	}
+	if has["add_candidate"] {
+		guidance += "\n\n**先记候选，再报漏洞（0day 流水线阶段 2–3）**：发现可疑点先 add_candidate 登记（title 写\"哪里可疑\"、location 写位置、rationale 写缺了哪层校验），并尽量把入口→sink 的路径按跳写进 hops：在线域每跳用真实 traffic id（ref_kind=traffic），离线域用源码位置（ref_kind=source，path[:line]，必须在授权目录清单内）。" +
+			"平台会在读取候选时逐跳核对，核对不过的跳标为未验证、可达性降为 claimed/partial——不要自己声称路径已验证。之后 report_finding 带上 candidate_id，平台把候选转为结论，报告里就能看到这条结论从哪来。"
+	}
 	if has["report_finding"] || has["add_task_hint"] || has["add_hint"] {
 		guidance = "\n\n**流量证据交接（可选）**：自动绑定默认由报告 Agent 在漏洞入库后、编写报告前完成。上报者应在 evidence 保留验证命令、关键输出、已有真实流量 ID 及其用途，任务中带 intent_id，便于报告 Agent 追溯；不必为了绑定额外查包。Auto / Planner 代为上报时不要丢弃执行者已有的引用。add_hint / add_task_hint 可用 traffic_refs 交接；显式即时绑定仍兼容 report_finding 的 traffic_refs / evidence_hint_id。TCP 或无包时正常登记，不能猜测 ID，也不能仅为补包重复探测。"
 		if has["add_task_hint"] && !has["add_hint"] {
