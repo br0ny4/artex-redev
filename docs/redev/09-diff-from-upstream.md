@@ -110,7 +110,7 @@ Go 文件 354 → 369
 （门状态查询、反例增删、撞车记录增删、撞车平台代检、撞车复核、PoC 写入/删除、PoC 平台重放）、
 候选 ×7（列表/新建/详情/加跳/删跳/改状态/转结论）
 （status/decisions/chain 三个端点发布快照时已有）
-新增测试函数 72 个（相对基线）：policy +15、vulngate +20、novelty +6、vulnpipe +3、server +24、db +2、traffic +1、docscheck +1
+新增测试函数 73 个（相对基线）：policy +15、vulngate +20、novelty +6、vulnpipe +3、server +24、db +2、agent +1、traffic +1、docscheck +1
 （包内总量：policy 53、vulngate 20、novelty 6、vulnpipe 3）
 ```
 

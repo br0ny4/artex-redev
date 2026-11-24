@@ -1288,17 +1288,17 @@ func (t *ToolSet) addFinding() actool.CoreTool {
 			EvidenceStatus string `json:"evidence_status"`
 			EvidenceNote   string `json:"evidence_note,omitempty"`
 		}{RecordedFinding: recorded, EvidenceStatus: "bound"}
-		if cid := pid(a.CandidateID); cid > 0 && t.ts != nil {
-			// 候选转结论不是上报的前提：失败只提示，绝不因此丢弃已经确认的漏洞。
-			if err := t.ts.LinkCandidateFinding(ctx, cid, recorded.FindingID); err != nil {
-				result.EvidenceNote = strings.TrimSpace(result.EvidenceNote + " 候选关联失败：" + err.Error())
-			}
-		}
 		if len(recorded.Traffic.Bindings) == 0 {
 			result.EvidenceStatus = "not_bound"
 			result.EvidenceNote = "漏洞已保存，未绑定流量。TCP/无包情形可正常继续；若已有核实的 HTTP 流量，请用可用的 bind_finding_traffic 或漏洞页面补绑，再完成证据交接。不要重复创建漏洞。"
 			if !findingTrafficBindingEnabled() {
 				result.EvidenceNote = "漏洞已保存。Agent 自动绑定流量已关闭，可在页面人工关联流量。"
+			}
+		}
+		if cid := pid(a.CandidateID); cid > 0 && t.ts != nil {
+			// 候选转结论不是上报的前提：失败只提示，绝不因此丢弃已经确认的漏洞。
+			if err := t.ts.LinkCandidateFinding(ctx, cid, recorded.FindingID); err != nil {
+				result.EvidenceNote = strings.TrimSpace(result.EvidenceNote + " 候选关联失败：" + err.Error())
 			}
 		}
 		raw, _ := json.Marshal(result)

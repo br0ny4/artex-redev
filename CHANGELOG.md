@@ -69,6 +69,8 @@
   断言范围外目标返回 403 + `X-ArtEx-Policy`、阻断说明含"平台管控"、尝试进了流量索引。
   用不存在的 `.invalid` 域名做目标：若代理把请求转发出去过，会得到 502 而不是 403——
   单测只能证明"判定返回 deny"，这个用例证明"代理真的没发包"。
+- **候选转结论写路径**：`report_finding` 带 `candidate_id` 后候选变 converted 并指向 finding；
+  候选 id 不存在只提示"候选关联失败"，不丢弃已确认的漏洞（`agent/candidate_pipeline_test.go`）。
 - **候选与可达性核对**：流量跳引用真实 id 才算核对通过、编造 id 降为 partial 且说明原因；
   离线域授权目录内源码通过、授权外文件/行号越界不通过；关联 finding 后候选 converted 且准入页带出；
   缺 location / 非法状态 400（`vulnpipe/vulnpipe_test.go`、`db/vuln_candidates_test.go`、
