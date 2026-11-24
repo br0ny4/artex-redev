@@ -27,11 +27,16 @@ engagement_requirements:
 # 运行时要求：源码审计域：纯本地只读分析、默认零出网，不需要录制代理。
 runtime:
   requires_traffic_capture: false
+  environment: offline
+  host_boundary:
+    allow_loopback: true
+    allow_inline_interpreters: true
+    allow_executing_scoped_files: false  # 被审计代码只读审计，不在宿主机上跑
 enforcement:
   mode: hard
   layers:
     - artifact_fs                    # 只读副本 + 产物目录（报告/补丁）
-    - tool_guard                     # PreToolUse：审计工具白名单，禁外传类命令
+    - tool_guard                     # PreToolUse：宿主机边界 + 外传类命令黑名单
     - egress_allowlist               # 默认零出网，只有报告通道
     - request_proxy                  # 报告提交同样受范围与预算约束
     - hold_controller                # 判不清 → 全量停止

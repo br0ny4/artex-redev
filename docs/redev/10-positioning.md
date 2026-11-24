@@ -54,6 +54,7 @@ ARTEX 被大规模滥用（FBI FLASH 通报、1400+ 无鉴权控制台）恰好�
 | 范围/语义判定在**发包前**（L3 代理出口） | `traffic/policy.go` | `traffic TestL3ProxyBlocksOutOfScopeBeforeSending` |
 | 在线域：策略启用后录制**不可关闭**、无代理拒绝启动 | `server/manager.go:488` | `server TestManagerRefusesDisablingCaptureUnderPolicy` |
 | 离线域：域包声明 `runtime.requires_traffic_capture: false` 后**可免代理启动**、录制可关 | `policy/engine.go` | `server TestManagerStartsWithOfflinePackWithoutProxy` |
+| 离线/本地域：只守宿主机边界（打坏本机、把不可信代码放上宿主机始终拒；`python -c`、样本内敏感字样、回环目标不再高频误拦） | `policy/hostguard.go` | `policy TestHostBoundaryOfflineRelaxations` |
 | 初始化入口要口令（未认证不可抢占） | `server/auth.go` | `server TestAuthInitRequiresSetupToken` |
 | 随仓库发布的部署模板必须真的能装进引擎 | `policy/config.go` | `policy TestLoadEngagementAcceptsShippedTemplate` |
 

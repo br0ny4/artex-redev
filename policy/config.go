@@ -48,6 +48,24 @@ type Config struct {
 // 用指针表达"未声明"：nil 按在线域（最严）处理——漏写不该把强制录制放松。
 type RuntimeConfig struct {
 	RequiresTrafficCapture *bool `yaml:"requires_traffic_capture" json:"requires_traffic_capture,omitempty"`
+
+	// Environment 声明域包是"在线测试"还是"离线/本地分析"：online | offline。
+	// 留空时按 RequiresTrafficCapture 推断（需要代理=在线）。两者的判定差异集中在
+	// 宿主机边界：离线域容许内联解释器、回环目标，但"打坏本机"的动作照样拒。
+	Environment string `yaml:"environment,omitempty" json:"environment,omitempty"`
+
+	// HostBoundary 覆盖宿主机边界的默认宽松度。只影响"离线域放宽什么"，
+	// 不影响"宿主机破坏类动作始终拒"（那部分不可配置）。
+	HostBoundary *HostBoundaryConfig `yaml:"host_boundary,omitempty" json:"host_boundary,omitempty"`
+}
+
+// HostBoundaryConfig 是离线/本地域的宿主机边界宽松度。指针=nil 表示未声明，按离线域
+// 默认值处理（allow_loopback / allow_inline_interpreters = true，
+// allow_executing_scoped_files = false）。
+type HostBoundaryConfig struct {
+	AllowLoopback             *bool `yaml:"allow_loopback,omitempty" json:"allow_loopback,omitempty"`
+	AllowInlineInterpreters   *bool `yaml:"allow_inline_interpreters,omitempty" json:"allow_inline_interpreters,omitempty"`
+	AllowExecutingScopedFiles *bool `yaml:"allow_executing_scoped_files,omitempty" json:"allow_executing_scoped_files,omitempty"`
 }
 
 // EngagementRequirements 是"部署上下文填什么才算完整"的域包声明。

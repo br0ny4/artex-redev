@@ -32,11 +32,16 @@ engagement_requirements:
 # 不需要用不上的 MITM 代理（录制可关，需要时仍可开）。
 runtime:
   requires_traffic_capture: false
+  environment: offline               # 离线分析域：只守宿主机边界，不按在线作业边界高频拦截
+  host_boundary:
+    allow_loopback: true             # 允许起/连本地辅助服务（解析器 stub、本地 mock）
+    allow_inline_interpreters: true  # 允许 python -c 之类一次性计算，载荷仍扫宿主机破坏动作
+    allow_executing_scoped_files: false  # 样本/被审计脚本只读不执行（要动态行为请换沙箱）
 enforcement:
   mode: hard
   layers:
     - artifact_fs                    # 产物目录收口：样本只读副本 + 输出目录
-    - tool_guard                     # PreToolUse：工具白名单、禁止宿主机执行样本
+    - tool_guard                     # PreToolUse：工具黑名单 + 宿主机边界（破坏本机/直接执行样本）
     - egress_allowlist               # 只有情报回源域名可出网
     - request_proxy                  # 仍然接管 HTTP：情报查询同样受范围与预算约束
     - hold_controller                # 判不清 → 全量停止

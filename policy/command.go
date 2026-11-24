@@ -13,6 +13,25 @@ import (
 // 只读身份命令。普通模式（本地沙箱里的 Bash）不套这条——那是操作者自己的机器。
 type CommandOptions struct {
 	RCEMode bool
+
+	// AllowInlineInterp 允许内联解释器（bash -c / python -c 等）。
+	// 在线测试域不要开：打到目标上的命令看不清真实动作，规范 6.4 明确禁止。
+	// 离线分析域可以开：那是操作者自己的机器，且分析脚本大量用 python -c 做一次性计算；
+	// 但载荷仍会过宿主机边界扫描（rm -rf /、dd of=/dev/sda 之类照样拒）。
+	AllowInlineInterp bool
+
+	// AllowLoopback 允许命令访问本机回环地址（127.0.0.1 / ::1 / localhost）。
+	// 离线/本地分析常要先起一个只监听本机的辅助服务（解析器 stub、本地 mock）。
+	AllowLoopback bool
+
+	// AuthorizedPaths 是 engagement.scope.local_paths（授权可读目录的绝对路径）。
+	// 用于两件事：读这些目录里的内容不按"敏感文件"拦（样本里出现 shadow 字样是常态）；
+	// 以及识别"直接执行授权目录内文件"（那是越过宿主机边界，见 AllowExecuteScoped）。
+	AuthorizedPaths []string
+
+	// AllowExecuteScoped 允许直接执行授权目录内的文件（样本 / 被审计代码的脚本）。
+	// 默认不允许：local_paths 是"允许读"的清单，不是"允许执行"的清单。
+	AllowExecuteScoped bool
 }
 
 // CommandVerdict 是命令判定结果。
@@ -81,23 +100,45 @@ func AnalyzeCommand(cmd string, lex *Lexicon, denyBinaries map[string]bool, opt 
 		return v
 	}
 
-	var prevBase string
+	var prevBase, cwd string
 	for _, seg := range segments {
 		if len(seg) == 0 {
 			continue
 		}
-		base := path.Base(seg[0])
+		raw := strings.TrimSpace(seg[0])
+		base := path.Base(raw)
 		base = strings.ToLower(strings.TrimSpace(base))
 		if base == "" || base == "sudo" || base == "env" || strings.Contains(seg[0], "=") {
 			// 跳过前缀/赋值，继续看后面的真实程序
 			if len(seg) > 1 {
-				base = path.Base(seg[1])
+				raw = strings.TrimSpace(seg[1])
+				base = path.Base(raw)
 				base = strings.ToLower(strings.TrimSpace(base))
 			} else {
 				continue
 			}
 		}
 		v.Binaries = append(v.Binaries, base)
+
+		// 0. 宿主机边界（始终启用，与域包无关）：打进宿主机的那几类动作。
+		//    `cd` 段只用来更新工作目录，供"直接执行授权目录内文件"判定使用。
+		if base == "cd" && len(seg) > 1 {
+			if t := strings.TrimSpace(seg[1]); strings.HasPrefix(t, "/") {
+				cwd = path.Clean(t)
+			}
+		}
+		if rule, reason, hit := hostDangerSegment(base, seg); hit {
+			return CommandVerdict{Deny: true, Rule: rule, Reason: reason, Binaries: v.Binaries, Targets: v.Targets}
+		}
+		// 0b. 直接执行授权目录内的文件（样本 / 被审计脚本）＝ 把不可信代码放上宿主机。
+		if !opt.AllowExecuteScoped {
+			if p := scopedExecTarget(base, raw, seg[1:], cwd, opt.AuthorizedPaths); p != "" {
+				return CommandVerdict{Deny: true, Rule: RuleHostExecScoped,
+					Reason: "授权目录（scope.local_paths）只允许读取，不允许直接执行：" + p +
+						"——样本/被审计代码是本次分析的不可信输入，在宿主机上运行会越界。确实要执行请用沙箱（binary-re 域包）或在域包配置 allow_executing_scoped_files",
+					Binaries: v.Binaries, Targets: v.Targets}
+			}
+		}
 
 		// 1. 扫描器/爆破器白名单制（第三章 3）：默认禁用，需逐次申请。
 		if denyBinaries != nil && denyBinaries[base] {
@@ -115,10 +156,31 @@ func AnalyzeCommand(cmd string, lex *Lexicon, denyBinaries map[string]bool, opt 
 		}
 
 		// 3. 内联解释器：`bash -c '...'`
+		//    在线域禁用（规范第三章 1、6.4：打到目标上的命令看不清动作）。
+		//    离线域按域包配置放行，但先把载荷扫一遍宿主机边界。
 		if flags, ok := inlineInterpFlags[base]; ok && hasAnyFlag(seg, flags) {
-			return CommandVerdict{Deny: true, Rule: "R:inline_interpreter",
-				Reason:   "禁止内联解释器（bash -c / python -c 等），静态判定无法确认真实动作（规范第三章 1、6.4）",
-				Binaries: v.Binaries, Targets: v.Targets}
+			if opt.RCEMode {
+				return CommandVerdict{Deny: true, Rule: "R:inline_interpreter",
+					Reason:   "RCE/webshell 会话禁止内联解释器（规范第三章 1、6.4）",
+					Binaries: v.Binaries, Targets: v.Targets}
+			}
+			if !opt.AllowInlineInterp {
+				return CommandVerdict{Deny: true, Rule: "R:inline_interpreter",
+					Reason:   "禁止内联解释器（bash -c / python -c 等），静态判定无法确认真实动作（规范第三章 1、6.4）；离线域包可配置 runtime.host_boundary.allow_inline_interpreters 放行",
+					Binaries: v.Binaries, Targets: v.Targets}
+			}
+			payload := strings.Join(seg[1:], " ")
+			if reason, hit := scanHostDangerPayload(payload); hit {
+				return CommandVerdict{Deny: true, Rule: RuleHostDestructive,
+					Reason: "内联解释器载荷越过宿主机边界：" + reason, Binaries: v.Binaries, Targets: v.Targets}
+			}
+			if !opt.AllowExecuteScoped {
+				if p := scopedExecTarget(base, raw, seg[1:], cwd, opt.AuthorizedPaths); p != "" {
+					return CommandVerdict{Deny: true, Rule: RuleHostExecScoped,
+						Reason:   "内联解释器执行授权目录（scope.local_paths）内的文件属于越界：" + p,
+						Binaries: v.Binaries, Targets: v.Targets}
+				}
+			}
 		}
 
 		// 4. RCE 模式：只允许只读身份命令（规范 6.4）
@@ -129,8 +191,17 @@ func AnalyzeCommand(cmd string, lex *Lexicon, denyBinaries map[string]bool, opt 
 		}
 
 		// 5. 敏感文件读取（规范 5.4 即停）
+		//    只对"路径形态"的参数生效：`grep -i shadow sample.bin` 里的 shadow 是搜索词，
+		//    不是文件；`strings sample.bin | grep shadow` 是样本分析常态，不该被拦。
+		//    授权目录（scope.local_paths）内的文件是本次分析对象，跳过敏感判定。
 		if readBinaries[base] {
 			for _, w := range seg[1:] {
+				if !looksLikePath(w) {
+					continue
+				}
+				if pathUnderAny(strings.Trim(w, `"'`), opt.AuthorizedPaths) {
+					continue
+				}
 				lower := strings.ToLower(w)
 				for _, tok := range sensitivePathTokens {
 					if strings.Contains(lower, tok) {

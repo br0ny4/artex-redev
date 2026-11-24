@@ -190,9 +190,16 @@ export ARTEX_ENGAGEMENT_FILE=./policy/binary-re/deployment-context.yaml
 离线域包不需要录制代理即可启动（在线域没有代理直接拒绝启动）：录制默认关、可随时开，
 `GET /api/policy/status` 的 `traffic_capture_required` 会说明当前域包的要求。
 
-目前**没有**硬判定谓词的两件事（文档里也写明了，别当保证）：直接在宿主机执行样本、经脚本/编码把产物
-外传。前者靠沙箱声明 + L2 出网收口 + guard 审批兜，后者依赖出网白名单阻挡目的地。
-详见 [`docs/redev/07-domain-packs.md`](docs/redev/07-domain-packs.md)。
+离线/本地域只守**宿主机边界**，不按在线作业边界高频拦截：
+
+- **始终拒绝**：`rm -rf /`、`dd of=/dev/sda`、`mkfs`、`shutdown`、`chmod -R 777 /`（含藏在
+  `python -c` 载荷里的同类动作）；直接执行 `scope.local_paths` 内的样本/被审计脚本；
+  读 `~/.ssh/id_rsa`、`/etc/shadow` 这类宿主机凭据。
+- **离线域放行**（`runtime.host_boundary`）：`python -c` 做一次性计算、样本里出现 `shadow`/`.env`
+  字样（敏感判定只认路径形态）、命令连 `127.0.0.1` 本地辅助服务。
+- 仍有边界在人工侧：经脚本/编码把产物外传，依赖 L2 出网白名单阻挡目的地。
+
+详见 [`docs/redev/07-domain-packs.md`](docs/redev/07-domain-packs.md) §2.2。
 
 ### 3.7 源码审计与 0day 挖掘（source-audit 域包）
 

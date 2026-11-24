@@ -41,6 +41,9 @@ type Engine struct {
 	eng            *Engagement
 	mode           string // hard | warn
 
+	offline bool         // 离线/本地分析域包
+	hb      hostBoundary // 宿主机边界宽松度（离线域默认宽松）
+
 	mu    sync.Mutex
 	holds map[string]string // taskKey → 挂起原因（任务级，供测试/未来按任务挂起）
 
@@ -98,14 +101,62 @@ func New(cfg *Config, lex *Lexicon, eng *Engagement, resolver Resolver) (*Engine
 	if mode == "" {
 		mode = "hard"
 	}
+	offline := offlineDomain(cfg)
 	e := &Engine{
 		cfg: cfg, lex: lex, cls: NewClassifier(lex, cfg.Semantics),
 		scope: scope, budget: NewBudget(cfg.Budget), secretPatterns: patterns,
 		eng: eng, mode: mode, holds: map[string]string{},
+		offline: offline, hb: resolveHostBoundary(cfg, offline),
 	}
 	e.budget.ApplyOverrides(engOverrides(eng))
 	return e, nil
 }
+
+// offlineDomain 判断域包是否属于"离线/本地分析"。显式 environment 优先；
+// 未声明时按"是否需要录制代理"推断——需要代理的就是在线域。
+func offlineDomain(cfg *Config) bool {
+	switch strings.ToLower(strings.TrimSpace(cfg.Runtime.Environment)) {
+	case "offline":
+		return true
+	case "online":
+		return false
+	}
+	req := true
+	if cfg.Runtime.RequiresTrafficCapture != nil {
+		req = *cfg.Runtime.RequiresTrafficCapture
+	}
+	return !req
+}
+
+// hostBoundary 是解析后的宿主机边界宽松度（离线域默认宽松，可被 yaml 覆盖）。
+type hostBoundary struct {
+	allowLoopback   bool
+	allowInline     bool
+	allowExecScoped bool
+}
+
+func resolveHostBoundary(cfg *Config, offline bool) hostBoundary {
+	hb := hostBoundary{}
+	if offline {
+		hb.allowLoopback = true
+		hb.allowInline = true
+	}
+	if c := cfg.Runtime.HostBoundary; c != nil {
+		if c.AllowLoopback != nil {
+			hb.allowLoopback = *c.AllowLoopback
+		}
+		if c.AllowInlineInterpreters != nil {
+			hb.allowInline = *c.AllowInlineInterpreters
+		}
+		if c.AllowExecutingScopedFiles != nil {
+			hb.allowExecScoped = *c.AllowExecutingScopedFiles
+		}
+	}
+	return hb
+}
+
+// Offline 表示本引擎按"离线/本地分析"域包运行。
+func (e *Engine) Offline() bool { return e != nil && e.offline }
 
 func engOverrides(eng *Engagement) map[string]any {
 	if eng == nil {
@@ -272,6 +323,16 @@ func (e *Engine) checkCommand(task, cmd string, opt CommandOptions) Decision {
 	if d := e.stopAllDecision(); d.Action != "" {
 		return d
 	}
+	// 域包决定"放宽什么"：离线域允许内联解释器与回环目标，但宿主机破坏类动作
+	// 在 AnalyzeCommand 里始终拒（不受这些开关影响）。
+	if e.offline {
+		opt.AllowInlineInterp = opt.AllowInlineInterp || e.hb.allowInline
+		opt.AllowLoopback = opt.AllowLoopback || e.hb.allowLoopback
+	}
+	opt.AllowExecuteScoped = opt.AllowExecuteScoped || e.hb.allowExecScoped
+	if len(opt.AuthorizedPaths) == 0 && e.eng != nil {
+		opt.AuthorizedPaths = e.eng.Scope.LocalPaths
+	}
 	denyBinaries := map[string]bool{}
 	for _, b := range e.cfg.Tools.DefaultDenyBinaries {
 		denyBinaries[strings.ToLower(strings.TrimSpace(b))] = true
@@ -283,6 +344,10 @@ func (e *Engine) checkCommand(task, cmd string, opt CommandOptions) Decision {
 	// 命令里出现的网络目标必须都在授权范围内（红线 1.2 / 4）
 	if e.eng != nil {
 		for _, t := range v.Targets {
+			// 离线/本地域：回环与 localhost 属于本地环境，不是"横向"。
+			if opt.AllowLoopback && isLoopbackTarget(t) {
+				continue
+			}
 			if sv, reason := e.scope.CheckHost(t); sv != ScopeAllow {
 				if sv == ScopeAmbiguous && !e.Enforcing() {
 					continue

@@ -49,6 +49,15 @@
 - **漏洞详情新增「准入」页**：三道门的完成度、还差什么的逐条原因，以及 PoC / 反例 / 撞车检索的
   录入与撤回表单——操作员不用再靠 curl 登记；判定仍是服务端强制，前端只负责录入与展示。
 
+- **离线/本地域的宿主机边界（只守"打坏本机"）**：新增 `policy/hostguard.go`，始终拒绝破坏宿主机的命令
+  （`rm -rf /`、`dd of=/dev/sda`、`mkfs`、`shutdown`/`reboot`、`chmod -R 777 /`、fork bomb，含藏在
+  `python -c`/`bash -c` 载荷里的同类动作）与"直接执行 `scope.local_paths` 内文件"（样本/被审计脚本只读、
+  默认不执行，可用 `allow_executing_scoped_files` 显式放开）。离线域通过 `runtime.host_boundary` 放宽
+  分析工作里的正常动作：`allow_inline_interpreters`（`python -c` 放行，载荷仍扫）与 `allow_loopback`
+  （`127.0.0.1`/`localhost` 视为本地环境）。敏感文件判定改为只认路径形态的参数——
+  `grep -i shadow sample.bin`、`strings sample.bin | grep shadow` 不再误拦，授权目录内的样本内容不按敏感文件判。
+  `binary-re`/`source-audit`/`malware-triage` 已声明 `environment: offline` 与上述默认值；
+  `web-pentest` 仍按在线域处理（内联解释器、回环目标照旧受规范 6.4 约束）。
 - **离线域包免录制代理启动**：域包用 `runtime.requires_traffic_capture` 声明是否需要录制代理。
   `web-pentest` 仍 fail-closed（没有代理拒绝启动、启用后录制不可关闭）；`binary-re` /
   `source-audit` / `malware-triage` 可免代理启动、录制可关——离线分析不该先被迫配 MITM 证书
@@ -57,6 +66,11 @@
 
 ### 测试
 
+- **宿主机边界**：离线域放行 `python -c` 一次性计算、样本内 `shadow` 字样、`rm -rf /tmp/...`、
+  `dd of=/dev/null`、连 `127.0.0.1`；仍拒 `rm -rf /`、`rm -rf /etc`、`dd of=/dev/sda`、`mkfs`、
+  `shutdown`、`chmod -R 777 /`、内联载荷里的删根/读 shadow、`cat ~/.ssh/id_rsa`、执行授权目录内样本
+  （含 `cd` 后相对路径与解释器执行脚本）；引擎层验证 `binary-re` 按离线域放宽、`web-pentest` 仍拒内联解释器
+  （`policy/hostguard_test.go`）。
 - **0day 准入端到端**：反例不足挡、5 条副本挡、撞车挡（带编号）、缺 PoC 挡、只复现 1 次挡、
   三门齐才放行、导出 409 与 force 行为（`vulngate` 10 个单测 + `server/finding_gate_test.go`）。
 - **PoC 平台重放**：带机器可判预期的 PoC 两次重放后复现次数由机器抬到 2、证据换成真实流量 id；

@@ -70,6 +70,50 @@ engagement:
 
 这不是给离线域"开后门"：离线域本来就不该有目标侧流量，代理对它只是环境负担。
 
+### 2.2 宿主机边界：离线域只守"打坏本机"，不守作业边界
+
+在线测试域的判断是"会不会打坏客户业务"（范围/语义/预算/红线）；离线分析域的判断只有一条：
+**会不会打坏自己的机器、或把不可信代码放到宿主机上跑起来**。两条轴分开后，离线分析
+才不会因为"python -c 做一次计算"或"样本里出现 shadow 字样"被频繁打断。
+
+`policy/hostguard.go` 这一层**始终启用**（在线域也拦，操作者的机器一样会被 `rm -rf /` 打坏）：
+
+| 始终拒绝（不可配置） | 规则 |
+|---|---|
+| `rm -rf /`、`rm -rf /etc`、`rm -rf ~` | `H:host_destructive` |
+| `dd if=… of=/dev/sda`、`mkfs.*`、`wipefs /dev/…` | `H:host_destructive` |
+| `shutdown` / `reboot` / `poweroff` / fork bomb | `H:host_destructive` |
+| `chmod -R 777 /`、`chown -R … /` | `H:host_destructive` |
+| 内联解释器载荷里的上述动作（`python -c 'os.system("rm -rf /")'`） | `H:host_destructive` |
+| 直接执行 `scope.local_paths` 内的文件（样本 / 被审计脚本） | `H:host_exec_scoped` |
+| 读宿主机凭据（`~/.ssh/id_rsa`、`/etc/shadow`、`/etc/sudoers`） | `R5_sensitive_read` |
+
+离线域相对在线域放宽的（`runtime.host_boundary`，默认已对齐下表）：
+
+| 配置项 | 离线默认 | 在线默认 | 含义 |
+|---|---|---|---|
+| `allow_loopback` | true | false | 命令里的 `127.0.0.1` / `::1` / `localhost` 视为本地环境，不算横向 |
+| `allow_inline_interpreters` | true | false | `python -c` / `bash -c` 放行（规范 6.4 只约束打到目标上的命令），载荷仍扫宿主机破坏动作 |
+| `allow_executing_scoped_files` | false | false | 是否允许直接执行 `local_paths` 内的文件；默认不——"可读清单"不是"可执行清单" |
+
+另外两处随此收紧/放宽的判定：
+
+- 敏感文件判定只对**路径形态**的参数生效：`grep -i shadow sample.bin` 里的 `shadow`
+  是搜索词，不再误拦；`strings sample.bin | grep -i shadow` 是样本分析常态，放行。
+- 授权目录内的文件不按敏感文件判（样本是分析对象，里面出现 `.env`、`shadow` 字样很正常）。
+
+域包 yaml 写法（`binary-re` / `source-audit` / `malware-triage` 已内置）：
+
+```yaml
+runtime:
+  environment: offline                  # 显式声明；留空时按 requires_traffic_capture 推断
+  host_boundary:
+    allow_loopback: true
+    allow_inline_interpreters: true
+    allow_executing_scoped_files: false
+```
+
+验收：`go test ./policy/ -run 'TestHostBoundary|TestEngineHostBoundary'`。
 ## 3. binary-re 包落地了什么
 
 可被平台**强制**的部分（有判定谓词、有测试）：
@@ -80,13 +124,15 @@ engagement:
 - 语义分级：情报查询（GET/读）放行，`submit`/`upload`/`detonate` 归 D 类需显式授权，
   对产物/报告的改写归 A/B 类红线。
 - 预算：情报查询 200 次/任务、1 rps、响应体 50MB 截断、敏感特征拦截仍生效。
-- 全量停止条件增加 `sample_upload_attempt`、`host_execution_attempt`。
+- 宿主机边界：`rm -rf /`、块设备写入、格式化、关机、递归改根权限始终拒；直接执行
+  `scope.local_paths` 内的样本默认拒（见 §2.2）。
 
 **还没有硬判定谓词的部分**（诚实说明，别当保证）：
 
-- "样本在宿主机执行"。平台能拦已知模拟器，但 `./sample`、`python exploit.py` 这类
-  任意执行不在现有命令判定谓词里；当前靠 deployment-context 的沙箱声明 +
-  L2 出网收口（`deploy/egress-lockdown/`）+ guard 审批来兜。
+- "样本在宿主机执行"：已有**词法级**判定——绝对路径、`cd <授权目录> && ./sample`、以及
+  `bash`/`python` 解释器执行授权目录内文件都会被拒（`H:host_exec_scoped`）。判定层不做 IO，
+  所以**解析不到的相对路径**（当前工作目录不在授权目录、符号链接指向样本、`./sample` 未经 `cd`）
+  仍可能漏判；那部分靠 deployment-context 的沙箱声明 + L2 出网收口 + guard 审批兜。
 - "经脚本/编码把产物外传"同理：出网白名单能挡住目的地，但挡不住先压缩再走允许域名的
   通道（这属于通道判定，规划在 P2.5 的触发验证切片里一并做）。
 
@@ -107,12 +153,17 @@ engagement:
 | | binary-re | malware-triage |
 |---|---|---|
 | 目标 | 反汇编/反编译、算法还原、漏洞定位 | 是什么、什么家族、有什么能力、IOC 清单 |
-| 样本执行 | 允许，但只能在声明过的沙箱（R13 沙箱外执行） | **一律不执行**（R13 `execute_sample_at_all`，命中即全量停止） |
+| 样本执行 | 允许，但只能在声明过的沙箱（R13 沙箱外执行） | **一律不执行**（R13 `execute_sample_at_all`：`wine`/`qemu`/`gdb`/`strace` 等默认禁用 + `H:host_exec_scoped` 拒直接执行；命中的是"拒这一次命令"，不是全量停止） |
 | 工具 | radare2/Ghidra/objdump/capa/YARA/FLOSS | file/hash/strings/exiftool/olevba/capa/YARA/FLOSS/diec |
 | 预算 | 情报查询 200 次/任务 | 100 次/任务（批量分诊时每个样本都要省） |
 
 应急响应前一小时用分诊包批量分类，需要动手挖的时候换 binary_re（并走沙箱审批）。
 两个包都支持同一套判定、审计与全量停止，切换只改部署上下文的 `engagement.pack`。
+
+**已知缺口（诚实说明）**：`stop.immediate_on` 目前只解析、没有消费者——yaml 里声明的
+"立即停止条件"（`sample_upload_attempt` / `host_execution_attempt` / `execution_attempt_any` 等）
+不会把任务升级为全量停止；实际生效的是对**该次动作**的硬拒绝（拒命令 / 出网白名单 / 范围判定）。
+要不要让这类红线升级为全量停止是可配置的运营决策，接线前文档不把它当保证。
 
 ## 4. 新增一个域包
 
